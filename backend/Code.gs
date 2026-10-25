@@ -8,7 +8,7 @@
  *   1) script.google.com → 새 프로젝트 → 이 파일 전체를 Code.gs 에 붙여넣기 (Index.html 필요 없음)
  *   2) 프로젝트 설정(⚙) → 스크립트 속성:
  *        GEMINI_API_KEY = (aistudio.google.com 발급 키)      ← 없으면 '규칙 기반 멘토'로 자동 동작(그림 생성만 꺼짐)
- *        TEACHER_PIN    = 1234  (선생님 메뉴 비밀번호, 바꿔서 쓰세요)
+ *        TEACHER_PIN    = (선생님 메뉴 비밀번호, 직접 정한 숫자)
  *        (선택) TEXT_MODEL = gemini-2.5-flash   IMAGE_MODEL = gemini-2.5-flash-image
  *   3) 함수 setup 선택 → ▶ 실행 → 권한 허용 → 실행 로그에 데이터 스프레드시트 URL
  *   4) 배포 → 새 배포 → 유형: 웹 앱 → 실행 계정: 나 / 액세스: 모든 사용자 → 배포 → '웹 앱 URL' 복사
@@ -196,7 +196,7 @@ function setup() {
   if (s1 && ss.getSheets().length > 1) ss.deleteSheet(s1);
   const cfg = ss.getSheetByName('설정');
   if (cfg.getLastRow() < 2) cfg.getRange(2, 1, 3, 2).setValues([['mentor_on', 'TRUE'], ['image_on', 'TRUE'], ['survey_phase', 'pre']]);
-  if (!props_().getProperty('TEACHER_PIN')) props_().setProperty('TEACHER_PIN', '1234');
+  if (!props_().getProperty('TEACHER_PIN')) props_().setProperty('TEACHER_PIN', String(Math.floor(100000 + Math.random() * 900000)));
   Logger.log('데이터 시트: ' + ss.getUrl());
   return ss.getUrl();
 }
@@ -474,7 +474,8 @@ function saveReflect(p) {
 
 // ───────────── 선생님 메뉴 ─────────────
 function teacher_(p) {
-  if (String(p.pin) !== String(props_().getProperty('TEACHER_PIN') || '1234')) return { error: '비밀번호가 달라요.' };
+  const pin_ = props_().getProperty('TEACHER_PIN');
+  if (!pin_ || String(p.pin) !== String(pin_)) return { error: '비밀번호가 달라요.' };
   const op = p.op || 'summary';
   if (op === 'toggle') { setSetting_(p.key, p.value ? 'TRUE' : 'FALSE'); return { ok: true }; }
   if (op === 'phase') { setSetting_('survey_phase', p.value === 'post' ? 'post' : 'pre'); return { ok: true, phase: p.value }; }

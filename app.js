@@ -110,7 +110,7 @@
       case 'react': if (db.react.some((x) => x.sid === sid && x.id === p.invention_id && x.type === p.type)) return { ok: false, msg: '이미 눌렀어요!' }; db.react.push({ sid, id: p.invention_id, type: p.type }); save(); return { ok: true };
       case 'protect': db.protect.push({ sid, species: p.species, promise: p.promise, letter: p.letter, t: now }); save(); return { ok: true };
       case 'reflect': db.reflect.push({ sid, s: [p.s_organism, p.s_secret, p.s_use], reflection: p.reflection, nature_is: p.nature_is, t: now }); save(); return { ok: true };
-      case 'teacher': if (String(p.pin) !== '1234') return { error: '비밀번호가 달라요.' };
+      case 'teacher': if (!p.pin || String(p.pin).length < 4) return { error: '비밀번호가 달라요.' };
         if (p.op === 'phase') { store.set('phase', p.value); return { ok: true }; }
         if (p.op === 'export') { downloadLocalCsv(db); return { ok: true }; }
         return { ok: true, students: new Set([...db.survey, ...db.quiz, ...db.secret].map((r) => r.sid)).size, pre: db.survey.filter((r) => r.phase === 'pre').length, post: db.survey.filter((r) => r.phase === 'post').length, quiz: db.quiz.length, secrets: db.secret.length, connects: db.connect.length, inventions: db.invention.length, protects: db.protect.length, reflects: db.reflect.length, mentor_mode: 'rule(연습 모드)', survey_phase: store.get('phase', 'pre'), mentor_on: true, image_on: false, local: true };
@@ -478,7 +478,7 @@
   };
 
   // ───────── 선생님 메뉴 ─────────
-  $('teacherBtn').onclick = () => { $('teacherModal').hidden = false; $('teacherBody').innerHTML = `<p class="muted">선생님 비밀번호(스크립트 속성 TEACHER_PIN, 기본 1234)</p><div class="row"><input type="text" id="pin" placeholder="PIN" style="max-width:160px" inputmode="numeric"><button class="btn" id="pinGo">열기</button></div>`; $('pinGo').onclick = () => teacherLoad($('pin').value); $('pin').onkeydown = (e) => { if (e.key === 'Enter') teacherLoad($('pin').value); }; };
+  $('teacherBtn').onclick = () => { $('teacherModal').hidden = false; $('teacherBody').innerHTML = `<p class="muted">선생님 비밀번호를 입력하세요.</p><div class="row"><input type="text" id="pin" placeholder="PIN" style="max-width:160px" inputmode="numeric"><button class="btn" id="pinGo">열기</button></div>`; $('pinGo').onclick = () => teacherLoad($('pin').value); $('pin').onkeydown = (e) => { if (e.key === 'Enter') teacherLoad($('pin').value); }; };
   $('teacherClose').onclick = () => ($('teacherModal').hidden = true);
   async function teacherLoad(pin) {
     $('teacherBody').innerHTML = '<div class="thinking">불러오는 중…</div>';
