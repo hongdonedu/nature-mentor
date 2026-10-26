@@ -19,6 +19,31 @@
     ['해바라기', '식물', '🌻', '꽃의 방향'], ['선인장', '식물', '🌵', '가시와 줄기'], ['장미', '식물', '🌹', '줄기의 가시'], ['대나무', '식물', '🎋', '줄기'], ['파리지옥', '식물', '🪴', '잎'],
   ].map((r) => ({ name: r[0], type: r[1], emoji: r[2], look: r[3] }));
   const EMOJI = Object.fromEntries(ORGANISMS.map((o) => [o.name, o.emoji]));
+  // ───────── 사진(Wikimedia Commons) · 구체 정보 · 검색 ─────────
+  const DATA = window.NM_DATA || {};
+  const WM = 'https://upload.wikimedia.org/wikipedia/commons/';
+  const LEVELS = ['모습', '하는 일', '까닭', '발명'];
+  function wmThumb(path, w) { return path ? `${WM}thumb/${path}/${w}px-${path.split('/').pop()}` : ''; }
+  function photoTag(name, w = 330, cls = '', key = 'photo') {
+    const d = DATA[name]; const emo = EMOJI[name] || '🌿';
+    if (!d || !d[key]) return `<span class="emo">${emo}</span>`;
+    const full = WM + d[key];
+    return `<img class="${cls}" src="${wmThumb(d[key], w)}" alt="${esc(name)} 사진" loading="lazy" onerror="if(!this.dataset.f){this.dataset.f=1;this.src='${full}'}else{this.outerHTML='<span class=&quot;emo&quot;>${emo}</span>'}">`;
+  }
+  const SEARCH = [
+    ['naver', '🟢 네이버', (q) => 'https://search.naver.com/search.naver?query=' + encodeURIComponent(q)],
+    ['naverimg', '🖼️ 네이버 사진', (q) => 'https://search.naver.com/search.naver?where=image&query=' + encodeURIComponent(q)],
+    ['dict', '📖 지식백과', (q) => 'https://terms.naver.com/search.naver?query=' + encodeURIComponent(q)],
+    ['google', '🔵 구글', (q) => 'https://www.google.com/search?safe=active&q=' + encodeURIComponent(q)],
+    ['googleimg', '🖼️ 구글 사진', (q) => 'https://www.google.com/search?safe=active&tbm=isch&q=' + encodeURIComponent(q)],
+  ];
+  function searchBar(q, org, compact) {
+    return `<div class="search-row ${compact ? 'compact' : ''}">${SEARCH.filter((x) => !compact || x[0] !== 'dict').map(([k, l, f]) => `<a class="sbtn s-${k}" href="${f(q)}" target="_blank" rel="noopener" data-engine="${k}" data-q="${esc(q)}" data-org="${esc(org || '')}">${l}</a>`).join('')}</div>`;
+  }
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest('a.sbtn'); if (!a || !S.me) return;
+    api('track', { engine: a.dataset.engine, query: a.dataset.q, organism: a.dataset.org, _soft: true }).catch(() => {});
+  });
 
   const ITEMS = [
     ['CNI01', 'CNI', '나는 자연에서 나는 여러 가지 소리(새소리, 바람 소리 등)를 듣는 것이 좋다.'], ['CNI02', 'CNI', '나는 자연에서 피어 있는 들꽃을 보는 것이 좋다.'], ['CNI03', 'CNI', '나는 슬플 때 밖에 나가서 자연을 즐기는 것이 좋다.'], ['CNI04', 'CNI', '자연 속에 있으면 마음이 편안해진다.'],
@@ -99,7 +124,8 @@
       case 'progress': return prog();
       case 'survey': db.survey.push({ sid, phase: p.phase, answers: p.answers, open: p.open, gender: p.gender, t: now }); save(); return { ok: true, phase: p.phase };
       case 'quiz': db.quiz.push({ sid, score: p.score, t: now }); save(); return { ok: true };
-      case 'askMentor': { const round = prog().rounds + 1; db.log.push({ sid, stage: 'observe', t: now }); save(); return Object.assign(ruleMentor(p, round), { round, cap: 6 }); }
+      case 'askMentor': { const round = prog().rounds + 1; db.log.push({ sid, stage: 'observe', t: now }); save(); return Object.assign(ruleMentor(p, Math.min(round - 1, 3)), { round, cap: 6 }); }
+      case 'track': db.log.push({ sid, stage: 'search', engine: p.engine, q: p.query, t: now }); save(); return { ok: true };
       case 'saveSecret': db.secret.push({ sid, organism: p.organism, secret: p.secret, t: now }); save(); return { ok: true, version: 1 };
       case 'connect': return ruleConnect(p.problem);
       case 'saveChoice': db.connect.push({ sid, problem: p.problem, chosen: p.chosen, reason: p.reason, t: now }); save(); return { ok: true };
@@ -123,11 +149,11 @@
     const csv = '﻿' + [head].concat(rows).map((r) => r.join(',')).join('\n');
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = 'nature_mentor_survey_local.csv'; a.click();
   }
-  function ruleMentor(p, round) {
-    const look = (S.orgs.find((o) => o.name === p.organism) || {}).look || '특별한 부분';
-    const ladder = [[`그 ${look}은(는) 어떤 모양인가요?`, '만져 보면 어떤 느낌일까요?', `${look}을(를) 더 가까이 봐요.`], ['그 부분은 어떤 일을 하나요?', '그 일을 못 하면 어떻게 될까요?', '움직일 때와 쉴 때를 비교해 봐요.'], ['왜 그렇게 생겼을까요?', '다른 생물과 무엇이 다를까요?', '사는 곳을 떠올려 봐요.'], ['우리 생활 어디에 쓸 수 있을까요?', '어떤 불편을 없앨 수 있을까요?', '비슷한 물건을 떠올려 봐요.']];
-    const st = ladder[Math.min(round - 1, 3)];
-    return { praise: p.what ? `"${p.what.slice(0, 14)}"을(를) 잘 봤어요!` : `${p.organism}을(를) 골랐군요!`, q1: st[0], q2: st[1], hint: st[2], mode: 'rule' };
+  function ruleMentor(p, level) {
+    const d = DATA[p.organism];
+    const Q = ['사진에서 그 모습을 찾아 "무엇이 특별해?" 칸에 내 말로 더 써 볼까요?', '그 모습 덕분에 하는 일을 "어떻게?" 칸에 써 볼까요?', '왜 그런 모양인지 "왜 그럴까?" 칸에 내 말로 써 볼까요?', '이 비밀을 우리 생활 어디에 또 쓸 수 있을까요?'];
+    const praise = p.why ? '"왜"까지 생각했군요, 멋져요!' : p.how ? '"어떻게"까지 잘 썼어요!' : p.what ? `"${p.what.slice(0, 14)}" 잘 관찰했어요!` : `${p.organism}을(를) 골랐군요!`;
+    return { praise, info: d ? d.facts[level] : '사진을 자세히 보고 특별한 부분을 찾아봐요.', q1: Q[level], keyword: d ? d.kw[level] : p.organism + ' 특징', level, mode: 'rule' };
   }
   function ruleConnect(problem) {
     const kw = [[['물', '비', '젖', '우산', '신발', '방수'], ['연잎', '오리', '나미브사막 딱정벌레']], [['미끄', '넘어', '붙', '떨어', '벽'], ['도마뱀붙이(게코)', '문어', '도꼬마리']], [['시끄', '소리', '소음', '조용'], ['올빼미', '물총새', '박쥐']], [['무거', '가방', '튼튼', '부러', '가벼'], ['대나무', '꿀벌', '거미']], [['더워', '추워', '덥', '춥', '온도'], ['흰개미', '북극곰', '선인장']], [['어두', '불', '밤', '빛'], ['반딧불이', '박쥐', '몰포나비']], [['아프', '다치', '머리', '안전'], ['딱따구리', '모기', '꿀벌']], [['빨리', '느려', '달리', '헤엄'], ['상어', '물총새', '혹등고래']]];
@@ -278,42 +304,72 @@
     draw();
   };
 
-  // ── 2. 비밀 찾기 ──
+  // ── 2. 비밀 찾기 (개별 활동) ──
+  function mentorBubble(r, org) {
+    if (!r.info && r.q2) return `<div class="mentor-bubble"><div class="mentor-avatar">🤖</div><div class="bubble"><div class="praise">${esc(r.praise)}</div><ul class="qs"><li>❓ ${esc(r.q1)}</li><li>❓ ${esc(r.q2)}</li></ul><div class="hint">💡 ${esc(r.hint || '')}</div></div></div>`;
+    const lv = typeof r.level === 'number' ? r.level : -1;
+    return `<div class="mentor-bubble"><div class="mentor-avatar">🤖</div><div class="bubble">
+      <div class="praise">${esc(r.praise)}</div>
+      ${lv >= 0 ? `<div class="lvl">${LEVELS.map((l, k) => `<span class="${k < lv ? 'ok' : k === lv ? 'on' : ''}">${k + 1}. ${l}</span>`).join('')}</div>` : ''}
+      <div class="info"><b>📚 멘토가 알려 주는 정보</b><p>${esc(r.info)}</p></div>
+      <ul class="qs"><li>✏️ ${esc(r.q1)}</li></ul>
+      ${r.keyword ? `<div class="hint">🔎 더 찾아볼 검색어: <b>${esc(r.keyword)}</b>${searchBar(r.keyword, org, true)}</div>` : ''}
+      ${r.capped ? '<div class="tiny" style="margin-top:6px">멘토 도움은 여기까지! 이제 알게 된 것을 모아 비밀 1문장을 써요.</div>' : ''}
+    </div></div>`;
+  }
   RENDER.observe = (el) => {
     const P = S.progress; let org = P.organism || '';
     const obs = store.get('obs_' + S.me.student_id, { what: P.what || '', how: P.how || '', why: P.why || '', secret: P.secret || '' });
+    const drawHero = () => {
+      if (!org) return;
+      const d = DATA[org] || {}; const o = S.orgs.find((x) => x.name === org) || {};
+      $('obsHero').innerHTML = `
+        <figure class="ph">${photoTag(org, 500, 'big')}${d.credit ? `<figcaption><a href="${d.credit}" target="_blank" rel="noopener">사진: Wikimedia Commons</a></figcaption>` : ''}</figure>
+        ${d.zoom ? `<figure class="ph zoom">${photoTag(org, 500, 'big', 'zoom')}<figcaption>🔬 확대해서 보면? · <a href="${d.zoom_credit}" target="_blank" rel="noopener">출처</a></figcaption></figure>` : ''}
+        <div class="org-info">
+          <h3>${EMOJI[org] || '🌿'} ${esc(org)}의 비밀을 찾아요</h3>
+          <p>👀 자세히 볼 곳: <b>${esc(o.look || '')}</b></p>
+          <div class="tiny">🔎 직접 찾아보기 (새 창으로 열려요)</div>
+          ${searchBar(org + ' ' + (o.look || ''), org)}
+          <div class="tiny" style="margin-top:6px">💡 생체모방 사례 찾기</div>
+          ${searchBar(org + ' 생체모방', org, true)}
+        </div>`;
+    };
     const draw = () => {
-      el.innerHTML = `<div class="steps"><span class="${org ? 'ok' : 'on'}">① 생물 고르기</span><span class="${org ? 'on' : ''}">② 관찰 기록</span><span>③ 멘토와 생각</span><span>④ 비밀 1문장</span></div>
-        <div class="card"><h2>🌿 비밀 찾기 — 동물·식물을 관찰해요</h2><p class="muted">모둠에서 고른 생물을 누르고, 세 가지 질문에 답을 써요. 멘토는 답 대신 <b>질문</b>을 줘요.</p>
+      el.innerHTML = `<div class="steps"><span class="${org ? 'ok' : 'on'}">① 생물 고르기</span><span class="${org ? 'on' : ''}">② 사진 관찰·검색</span><span>③ 멘토 정보로 채우기</span><span>④ 비밀 1문장</span></div>
+        <div class="card"><h2>🌿 비밀 찾기 — 나만의 생물을 관찰해요</h2><p class="muted"><b>혼자 하는 활동이에요.</b> 관찰할 생물을 하나 골라 사진을 자세히 보고, 네이버·구글에서 찾아보고, 네이처 멘토의 정보를 받아 세 칸을 내 말로 채워요.</p>
         <div class="chips" style="margin:6px 0 10px"><button class="chip sel" data-f="all">전체</button><button class="chip" data-f="동물">동물</button><button class="chip" data-f="식물">식물</button></div>
         <div class="org-grid" id="orgGrid"></div></div>
         <div class="card" id="obsForm" ${org ? '' : 'hidden'}>
-          <h3 id="obsTitle"></h3>
-          <div class="field"><div class="q"><span class="n">1</span>무엇이 특별해? (모양·색깔·크기·움직임)</div><textarea id="what">${esc(obs.what)}</textarea></div>
-          <div class="field"><div class="q"><span class="n">2</span>어떻게 그런 일을 해?</div><textarea id="how">${esc(obs.how)}</textarea></div>
+          <div class="org-hero" id="obsHero"></div>
+          <div class="field"><div class="q"><span class="n">1</span>무엇이 특별해? (모양·색깔·크기·움직임)</div><textarea id="what" placeholder="사진에서 본 것을 써요">${esc(obs.what)}</textarea></div>
+          <div class="field"><div class="q"><span class="n">2</span>어떻게 그런 일을 해?</div><textarea id="how" placeholder="검색이나 멘토 정보에서 알게 된 것을 내 말로 써요">${esc(obs.how)}</textarea></div>
           <div class="field"><div class="q"><span class="n">3</span>왜 그럴까?</div><textarea id="why">${esc(obs.why)}</textarea></div>
-          <div class="actions"><button class="btn violet" id="ask">🤖 네이처 멘토에게 물어보기</button><span class="tiny" id="roundInfo">${P.rounds ? `지금까지 ${P.rounds}번 물어봤어요` : ''}</span></div>
+          <div class="actions"><button class="btn violet" id="ask">🤖 네이처 멘토에게 물어보기</button><span class="tiny" id="roundInfo">${P.rounds ? `지금까지 ${P.rounds}번 물어봤어요` : '물어볼 때마다 모습 → 하는 일 → 까닭 → 발명 순서로 정보를 알려 줘요'}</span></div>
           <div id="mentorOut" style="margin-top:14px"></div>
         </div>
         <div class="card mentor" id="secretCard" ${org ? '' : 'hidden'}><h3>✍️ 비밀 1문장 만들기</h3>
           <p class="muted">틀: <b>○○의 비밀은 ~~해서 ~~할 수 있다는 것!</b></p>
-          <textarea id="secret" placeholder="예) 연잎의 비밀은 작은 돌기가 있어서 물이 굴러 떨어진다는 것!">${esc(obs.secret)}</textarea>
+          <textarea id="secret" placeholder="예) 연잎의 비밀은 작은 돌기와 왁스가 있어서 물이 굴러 떨어진다는 것!">${esc(obs.secret)}</textarea>
           <div class="actions"><button class="btn" id="saveSecret">비밀 저장하기 ✅</button>${P.secret ? '<span class="badge">저장한 비밀이 있어요 · 고치면 새 버전으로 저장돼요</span>' : ''}</div></div>`;
       const grid = $('orgGrid');
-      const drawGrid = (f) => { grid.innerHTML = S.orgs.filter((o) => f === 'all' || o.type === f).map((o) => `<button class="org ${o.name === org ? 'sel' : ''}" data-n="${esc(o.name)}"><span>${o.emoji}</span><b>${esc(o.name)}</b><small>${esc(o.look)}</small></button>`).join(''); grid.querySelectorAll('.org').forEach((b) => b.onclick = () => { org = b.dataset.n; grid.querySelectorAll('.org').forEach((x) => x.classList.toggle('sel', x.dataset.n === org)); $('obsForm').hidden = false; $('secretCard').hidden = false; $('obsTitle').textContent = `${EMOJI[org] || '🌿'} ${org}의 비밀을 찾아요`; $('obsForm').scrollIntoView({ behavior: 'smooth' }); }); };
+      const drawGrid = (f) => {
+        grid.innerHTML = S.orgs.filter((o) => f === 'all' || o.type === f).map((o) => `<button class="org ${o.name === org ? 'sel' : ''}" data-n="${esc(o.name)}"><div class="oph">${photoTag(o.name, 330)}</div><b>${esc(o.name)}</b><small>${esc(o.look)}</small></button>`).join('');
+        grid.querySelectorAll('.org').forEach((b) => b.onclick = () => { org = b.dataset.n; grid.querySelectorAll('.org').forEach((x) => x.classList.toggle('sel', x.dataset.n === org)); $('obsForm').hidden = false; $('secretCard').hidden = false; $('mentorOut').innerHTML = ''; drawHero(); $('obsForm').scrollIntoView({ behavior: 'smooth' }); });
+      };
       drawGrid('all');
       el.querySelectorAll('.chip[data-f]').forEach((c) => c.onclick = () => { el.querySelectorAll('.chip[data-f]').forEach((x) => x.classList.remove('sel')); c.classList.add('sel'); drawGrid(c.dataset.f); });
-      if (org) $('obsTitle').textContent = `${EMOJI[org] || '🌿'} ${org}의 비밀을 찾아요`;
+      drawHero();
       const keep = () => store.set('obs_' + S.me.student_id, { what: $('what').value, how: $('how').value, why: $('why').value, secret: $('secret').value });
       ['what', 'how', 'why', 'secret'].forEach((id) => $(id).oninput = keep);
       $('ask').onclick = async () => {
-        if (!$('what').value.trim()) { toast('먼저 "무엇이 특별해?"를 한 가지 써 봐요!'); $('what').focus(); return; }
-        $('ask').disabled = true; $('mentorOut').innerHTML = `<div class="mentor-bubble"><div class="mentor-avatar">🤖</div><div class="bubble thinking">멘토가 생각하고 있어요…</div></div>`;
+        if (!$('what').value.trim()) { toast('먼저 사진을 보고 "무엇이 특별해?"를 한 가지 써 봐요!'); $('what').focus(); return; }
+        $('ask').disabled = true; $('mentorOut').innerHTML = `<div class="mentor-bubble"><div class="mentor-avatar">🤖</div><div class="bubble thinking">멘토가 정보를 찾고 있어요…</div></div>`;
         try {
           const r = await api('askMentor', { organism: org, what: $('what').value, how: $('how').value, why: $('why').value });
-          $('mentorOut').innerHTML = `<div class="mentor-bubble"><div class="mentor-avatar">🤖</div><div class="bubble"><div class="praise">${esc(r.praise)}</div><ul class="qs"><li>❓ ${esc(r.q1)}</li><li>❓ ${esc(r.q2)}</li></ul><div class="hint">💡 힌트: ${esc(r.hint)}</div>${r.capped ? '<div class="tiny" style="margin-top:6px">질문은 여기까지! 이제 비밀 1문장을 써요.</div>' : ''}</div></div>`;
-          if (r.round) { S.progress.rounds = r.round; $('roundInfo').textContent = `${r.round}/${r.cap}번 물어봤어요`; }
-        } catch (e) { $('mentorOut').innerHTML = `<div class="banner">멘토가 잠깐 쉬고 있어요. 선생님께 질문하거나 잠시 뒤 다시 눌러요. (${esc(e.message)})</div>`; }
+          $('mentorOut').innerHTML = mentorBubble(r, org);
+          if (r.round) { S.progress.rounds = r.round; $('roundInfo').textContent = `${Math.min(r.round, r.cap)}/${r.cap}번 물어봤어요`; }
+        } catch (e) { $('mentorOut').innerHTML = `<div class="banner">멘토가 잠깐 쉬고 있어요. 검색으로 먼저 찾아보고 잠시 뒤 다시 눌러요. (${esc(e.message)})</div>`; }
         $('ask').disabled = false;
       };
       $('saveSecret').onclick = async () => {
@@ -350,7 +406,7 @@
         if (r.redirect && !(r.candidates || []).length) { $('cands').innerHTML = `<div class="banner">${esc(r.redirect)}</div>`; }
         else {
           cands = r.candidates || [];
-          $('cands').innerHTML = cands.map((c, i) => `<button class="cand" data-i="${i}"><span class="ce">${EMOJI[c.organism] || '🌿'}</span><div><b>${esc(c.organism)}</b> <span class="tiny">${esc(c.feature)}</span><div>${esc(c.principle)}</div><div class="tiny">${esc(c.why_fit)}</div></div></button>`).join('');
+          $('cands').innerHTML = cands.map((c, i) => `<button class="cand" data-i="${i}"><span class="ce">${photoTag(c.organism, 120)}</span><div><b>${esc(c.organism)}</b> <span class="tiny">${esc(c.feature)}</span><div>${esc(c.principle)}</div><div class="tiny">${esc(c.why_fit)}</div></div></button>`).join('');
           $('cands').querySelectorAll('.cand').forEach((b) => b.onclick = () => { chosen = cands[parseInt(b.dataset.i, 10)]; $('cands').querySelectorAll('.cand').forEach((x) => x.classList.toggle('sel', x === b)); $('whyCard').hidden = false; $('chosenBadge').textContent = (EMOJI[chosen.organism] || '🌿') + ' ' + chosen.organism; $('whyCard').scrollIntoView({ behavior: 'smooth' }); });
         }
       } catch (e) { $('cands').innerHTML = `<div class="banner">멘토가 잠깐 쉬고 있어요. 생물 카드에서 직접 골라도 돼요. (${esc(e.message)})</div>`; }
@@ -462,7 +518,7 @@
       try {
         const r = await api('gallery', { class: S.me.class }); const items = r.items || [];
         if (!items.length) { $('gal').innerHTML = '<div class="card soft">아직 올라온 작품이 없어요. 4. 발명하기에서 설계도를 올려요!</div>'; return; }
-        $('gal').innerHTML = items.map((w) => `<div class="work ${w.student_id === S.me.student_id ? 'mine' : ''}" data-id="${w.invention_id}"><div class="thumb" data-f="${esc(w.file_id || '')}">${w.sketch ? `<img src="${w.sketch}">` : (EMOJI[w.organism] || '🌿')}</div><div class="wb"><b>${esc(w.name)}</b><span class="tiny">${w.seat}번 · ${EMOJI[w.organism] || ''} ${esc(w.organism)}</span><p>${esc(w.description)}</p><div class="react"><button data-t="like">👍 ${w.likes}</button><button data-t="curious">❓ ${w.curious}</button></div></div></div>`).join('');
+        $('gal').innerHTML = items.map((w) => `<div class="work ${w.student_id === S.me.student_id ? 'mine' : ''}" data-id="${w.invention_id}"><div class="thumb" data-f="${esc(w.file_id || '')}">${w.sketch ? `<img src="${w.sketch}">` : photoTag(w.organism, 330)}</div><div class="wb"><b>${esc(w.name)}</b><span class="tiny">${w.seat}번 · ${EMOJI[w.organism] || ''} ${esc(w.organism)}</span><p>${esc(w.description)}</p><div class="react"><button data-t="like">👍 ${w.likes}</button><button data-t="curious">❓ ${w.curious}</button></div></div></div>`).join('');
         $('gal').querySelectorAll('.react button').forEach((b) => b.onclick = async () => { const id = b.closest('.work').dataset.id; try { const r = await api('react', { invention_id: id, type: b.dataset.t, _soft: true }); toast(r.ok ? '마음을 전했어요 💌' : r.msg || r.error); if (r.ok) loadGallery(); } catch (e) { toast(e.message); } });
         if (!LOCAL) $('gal').querySelectorAll('.thumb[data-f]').forEach(async (t) => { if (!t.dataset.f) return; try { const r = await api('image', { file_id: t.dataset.f }); if (r.data_url) t.innerHTML = `<img src="${r.data_url}">`; } catch (e) {} });
         const mine = store.get('sketch_' + S.me.student_id, ''); const myCard = $('gal').querySelector('.work.mine .thumb'); if (mine && myCard && !myCard.querySelector('img') && !myCard.dataset.f) myCard.innerHTML = `<img src="${mine}">`;
