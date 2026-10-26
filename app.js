@@ -124,7 +124,7 @@
       case 'progress': return prog();
       case 'survey': db.survey.push({ sid, phase: p.phase, answers: p.answers, open: p.open, gender: p.gender, t: now }); save(); return { ok: true, phase: p.phase };
       case 'quiz': db.quiz.push({ sid, score: p.score, t: now }); save(); return { ok: true };
-      case 'askMentor': { const round = prog().rounds + 1; db.log.push({ sid, stage: 'observe', t: now }); save(); return Object.assign(ruleMentor(p, Math.min(round - 1, 3)), { round, cap: 6 }); }
+      case 'askMentor': { const round = db.log.filter((x) => x.sid === sid && x.stage === 'observe' && x.org === p.organism).length + 1; db.log.push({ sid, stage: 'observe', org: p.organism, t: now }); save(); return Object.assign(ruleMentor(p, Math.min(round - 1, 3)), { round, cap: 6 }); }
       case 'track': db.log.push({ sid, stage: 'search', engine: p.engine, q: p.query, t: now }); save(); return { ok: true };
       case 'saveSecret': db.secret.push({ sid, organism: p.organism, secret: p.secret, t: now }); save(); return { ok: true, version: 1 };
       case 'connect': return ruleConnect(p.problem);
@@ -368,7 +368,7 @@
         try {
           const r = await api('askMentor', { organism: org, what: $('what').value, how: $('how').value, why: $('why').value });
           $('mentorOut').innerHTML = mentorBubble(r, org);
-          if (r.round) { S.progress.rounds = r.round; $('roundInfo').textContent = `${Math.min(r.round, r.cap)}/${r.cap}번 물어봤어요`; }
+          if (r.round) { S.progress.rounds = r.round; $('roundInfo').textContent = `${org}: ${Math.min(r.round, r.cap)}/${r.cap}번 물어봤어요`; }
         } catch (e) { $('mentorOut').innerHTML = `<div class="banner">멘토가 잠깐 쉬고 있어요. 검색으로 먼저 찾아보고 잠시 뒤 다시 눌러요. (${esc(e.message)})</div>`; }
         $('ask').disabled = false;
       };

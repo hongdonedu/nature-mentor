@@ -338,8 +338,12 @@ function ruleMentor_(organism, what, how, why, level) {
 function askMentor(p) {
   const sid = p.student_id, cls = p.class, seat = p.seat;
   if (!setting_('mentor_on')) return { praise: '지금은 멘토가 쉬는 시간이에요.', info: '사진과 검색으로 직접 찾아봐요.', q1: '찾은 내용을 내 말로 써 볼까요?', keyword: String(p.organism || '') + ' 특징' };
-  const round = countRows_('로그', 1, sid, 4, 'observe') + 1;
-  if (round > APP.ROUND_CAP) return { praise: '정말 열심히 생각했어요!', info: '지금까지 알게 된 정보를 모으면 비밀 1문장이 돼요.', q1: '이제 내 말로 비밀을 정리해 볼까요?', keyword: String(p.organism || '') + ' 생체모방', capped: true, round: round, cap: APP.ROUND_CAP };
+  // 단계는 '생물별'로 셉니다(생물을 바꾸면 모습부터 다시). 전체 상한은 ROUND_CAP × 3
+  const rows = sheet_('로그').getDataRange().getValues(); let total = 0, orgRound = 0;
+  const tag = '"organism":' + JSON.stringify(String(p.organism || ''));
+  for (var r = 1; r < rows.length; r++) if (rows[r][1] === sid && rows[r][4] === 'observe') { total++; if (String(rows[r][6]).indexOf(tag) >= 0) orgRound++; }
+  const round = orgRound + 1;
+  if (round > APP.ROUND_CAP || total >= APP.ROUND_CAP * 3) return { praise: '정말 열심히 생각했어요!', info: '지금까지 알게 된 정보를 모으면 비밀 1문장이 돼요.', q1: '이제 내 말로 비밀을 정리해 볼까요?', keyword: String(p.organism || '') + ' 생체모방', capped: true, round: round, cap: APP.ROUND_CAP };
   const what = sanitize_(p.what), how = sanitize_(p.how), why = sanitize_(p.why);
   const input = { organism: p.organism, what: what, how: how, why: why };
   if (isBlocked_(what + how + why)) { log_(sid, cls, seat, 'observe', round, input, { redirect: true }, 'rule', 0); return { praise: '궁금한 게 많군요!', info: '지금은 생물의 특별한 모습을 찾아보는 시간이에요.', q1: '고른 생물의 어디가 특별해 보이나요?', keyword: String(p.organism || '') + ' 특징' }; }
