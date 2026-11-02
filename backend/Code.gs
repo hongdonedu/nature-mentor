@@ -505,7 +505,8 @@ function commentsByTarget_() {
   for (var i = 1; i < rows.length; i++) {
     if (String(rows[i][6]).toUpperCase() === 'TRUE') continue;   // 선생님이 hidden 칸에 TRUE → 숨김
     const t = sidStr_(rows[i][3]); const from = sidStr_(rows[i][1]);
-    (by[t] = by[t] || []).push({ from_seat: from.split('-')[1], text: String(rows[i][5]), time: String(rows[i][0]).slice(5, 16) });
+    const ts = rows[i][0] instanceof Date ? Utilities.formatDate(rows[i][0], tz_(), 'M/d HH:mm') : String(rows[i][0]).slice(5, 16);
+    (by[t] = by[t] || []).push({ from_seat: from.split('-')[1], text: String(rows[i][5]), time: ts });
   }
   return by;
 }
@@ -516,7 +517,8 @@ function getGallery(classNo) {
   const reacts = sheet_('반응').getDataRange().getValues(); const count = {};
   for (var j = 1; j < reacts.length; j++) { const key = reacts[j][2] + '|' + reacts[j][3]; count[key] = (count[key] || 0) + 1; }
   const cm = commentsByTarget_();
-  return Object.keys(latest).map(function (sid) {
+  return Object.keys(latest).filter(function (sid) { return parseInt(sid.split('-')[1], 10) < 90; })   // 90번 이상 = 교사 테스트용 → 박람회에 안 보임
+  .map(function (sid) {
     const r = latest[sid];
     return { invention_id: r[1], student_id: sid, seat: sid.split('-')[1], organism: r[4], name: r[5], description: r[6], file_id: r[8], likes: count[r[1] + '|like'] || 0, curious: count[r[1] + '|curious'] || 0, comments: cm[sid] || [] };
   }).sort(function (a, b) { return parseInt(a.seat, 10) - parseInt(b.seat, 10); });
