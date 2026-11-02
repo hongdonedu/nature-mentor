@@ -90,7 +90,9 @@
   ];
 
   // ───────── 상태 ─────────
-  const S = { me: store.get('me', null), progress: {}, online: null, mode: 'rule', imageOn: false, mentorOn: true, phase: 'pre', view: 'home', orgs: ORGANISMS, gallery: [] };
+  const sess = { get: (k) => { try { const v = sessionStorage.getItem('nm_' + k); return v ? JSON.parse(v) : null; } catch (e) { return null; } }, set: (k, v) => { try { sessionStorage.setItem('nm_' + k, JSON.stringify(v)); } catch (e) {} } };
+  // 같은 크롬북을 여러 학생이 쓰므로: 이 탭에서 확인한 번호만 자동 사용, 새로 열면 반·번호를 다시 확인
+  const S = { me: sess.get('me'), lastMe: store.get('me', null), progress: {}, online: null, mode: 'rule', imageOn: false, mentorOn: true, phase: 'pre', view: 'home', orgs: ORGANISMS, gallery: [] };
   let toastT;
   function toast(m, ms = 2600) { const t = $('toast'); t.textContent = m; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => (t.hidden = true), ms); }
 
@@ -183,7 +185,7 @@
   function openLogin() {
     $('selClass').innerHTML = (CFG.CLASSES || [1, 2, 3, 4, 5, 6]).map((c) => `<option value="${c}">${c}반</option>`).join('');
     $('selSeat').innerHTML = Array.from({ length: CFG.SEATS || 32 }, (_, i) => `<option value="${i + 1}">${i + 1}번</option>`).join('') + '<option value="99">99번(선생님 테스트)</option>';
-    if (S.me) { $('selClass').value = S.me.class; $('selSeat').value = S.me.seat; }
+    const pre = S.me || S.lastMe; if (pre) { $('selClass').value = pre.class; $('selSeat').value = pre.seat; }
     $('loginModal').hidden = false;
   }
   $('clsChip').onclick = openLogin;
@@ -194,7 +196,7 @@
       S.me = { student_id: cls + '-' + seat, class: cls, seat };
       const r = await api('login', { class: cls, seat });
       S.progress = r.progress || {}; S.imageOn = !!r.image_on; S.mentorOn = r.mentor_on !== false; S.phase = r.survey_phase || 'pre';
-      store.set('me', S.me);
+      store.set('me', S.me); sess.set('me', S.me);
       $('clsLabel').textContent = `${cls}반 ${seat}번`; $('clsChip').classList.remove('unset');
       $('loginModal').hidden = true; toast(`안녕하세요, ${cls}반 ${seat}번 발명가! 🌿`);
       renderNav(); go(S.pending || (S.view === 'home' ? 'home' : S.view)); S.pending = null;
@@ -566,6 +568,7 @@
     if (S.me) { $('clsLabel').textContent = `${S.me.class}반 ${S.me.seat}번`; $('clsChip').classList.remove('unset'); try { const r = await api('login', { class: S.me.class, seat: S.me.seat }); S.progress = r.progress || {}; S.imageOn = !!r.image_on; S.phase = r.survey_phase || 'pre'; } catch (e) {} }
     const h = location.hash.replace('#', '');
     go(VIEWS.some((v) => v.id === h) ? h : 'home');
+    if (!S.me) openLogin();
   }
   window.addEventListener('hashchange', () => { const h = location.hash.replace('#', ''); if (h && h !== S.view && (h === 'home' || VIEWS.some((v) => v.id === h))) go(h); });
   boot();

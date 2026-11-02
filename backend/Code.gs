@@ -174,6 +174,29 @@ function apiKey_() { const k = props_().getProperty('GEMINI_API_KEY'); if (!k) t
 function textModel_() { return props_().getProperty('TEXT_MODEL') || APP.TEXT_MODEL_DEFAULT; }
 function imageModel_() { return props_().getProperty('IMAGE_MODEL') || APP.IMAGE_MODEL_DEFAULT; }
 function now_() { return Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss'); }
+// 학생 번호 "1-7"을 시트가 날짜(1월 7일)로 바꾸는 문제 대응: 읽을 때는 날짜→"반-번호"로 되돌리고, 쓸 때는 텍스트로 강제
+let TZ_ = null;
+function tz_() { if (!TZ_) { try { TZ_ = ss_().getSpreadsheetTimeZone(); } catch (e) { TZ_ = 'Asia/Seoul'; } } return TZ_; }
+function sidStr_(v) {
+  if (v instanceof Date) return Utilities.formatDate(v, tz_(), 'M-d');
+  return String(v === null || v === undefined ? '' : v).replace(/^'/, '');
+}
+function sidCell_(sid) { return "'" + sidStr_(sid); }
+const SID_COL = { '학생': 1, '설문': 2, '퀴즈': 2, '로그': 2, '비밀': 2, '연결': 2, '발명': 3, '반응': 2, '지킴이': 2, '소감': 2 };
+/** 한 번만 실행: 이미 날짜로 바뀐 학생 번호를 "반-번호" 텍스트로 되돌리고, 해당 열을 텍스트 서식으로 고정 */
+function fixStudentIds() {
+  let changed = 0;
+  Object.keys(SID_COL).forEach(function (name) {
+    const sh = sheet_(name); const col = SID_COL[name];
+    sh.getRange(1, col, sh.getMaxRows(), 1).setNumberFormat('@');
+    const n = sh.getLastRow(); if (n < 2) return;
+    const rg = sh.getRange(2, col, n - 1, 1); const vals = rg.getValues();
+    const out = vals.map(function (r) { if (r[0] instanceof Date) changed++; return [sidStr_(r[0])]; });
+    rg.setValues(out);
+  });
+  Logger.log('학생 번호 복구: ' + changed + '칸');
+  return changed;
+}
 
 const SHEETS = {
   '학생': ['student_id', 'class', 'seat', 'first_seen', 'last_seen'],
@@ -206,6 +229,7 @@ function setup() {
   if (s1 && ss.getSheets().length > 1) ss.deleteSheet(s1);
   const cfg = ss.getSheetByName('설정');
   if (cfg.getLastRow() < 2) cfg.getRange(2, 1, 3, 2).setValues([['mentor_on', 'TRUE'], ['image_on', 'TRUE'], ['survey_phase', 'pre']]);
+  Object.keys(SID_COL).forEach(function (name) { const sh = ss.getSheetByName(name); if (sh) sh.getRange(1, SID_COL[name], sh.getMaxRows(), 1).setNumberFormat('@'); });
   if (!props_().getProperty('TEACHER_PIN')) props_().setProperty('TEACHER_PIN', String(Math.floor(100000 + Math.random() * 900000)));
   Logger.log('데이터 시트: ' + ss.getUrl());
   return ss.getUrl();
@@ -256,7 +280,7 @@ function parseJson_(text, fallback) {
   try { return JSON.parse(text); } catch (e) { const m = String(text).match(/\{[\s\S]*\}/); if (m) { try { return JSON.parse(m[0]); } catch (e2) {} } return fallback; }
 }
 function log_(sid, cls, seat, stage, round, input, output, model, ms) {
-  sheet_('로그').appendRow([now_(), sid, cls, seat, stage, round, JSON.stringify(input), JSON.stringify(output), model, ms]);
+  sheet_('로그').appendRow([now_(), sidCell_(sid), cls, seat, stage, round, JSON.stringify(input), JSON.stringify(output), model, ms]);
 }
 
 // ───────────── 학생 ─────────────
@@ -265,8 +289,8 @@ function login(classNo, seatNo) {
   if (!(classNo >= 1 && classNo <= 20 && seatNo >= 1 && seatNo <= 99)) throw new Error('반과 번호를 다시 확인해 주세요.');
   const sid = classNo + '-' + seatNo;
   const sh = sheet_('학생'); const rows = sh.getDataRange().getValues(); let found = false;
-  for (var i = 1; i < rows.length; i++) if (rows[i][0] === sid) { sh.getRange(i + 1, 5).setValue(now_()); found = true; break; }
-  if (!found) sh.appendRow([sid, classNo, seatNo, now_(), now_()]);
+  for (var i = 1; i < rows.length; i++) if (sidStr_(rows[i][0]) === sid) { sh.getRange(i + 1, 5).setValue(now_()); found = true; break; }
+  if (!found) sh.appendRow([sidCell_(sid), classNo, seatNo, now_(), now_()]);
   const prog = progress_(sid);
   return { student_id: sid, class: classNo, seat: seatNo, mentor_on: setting_('mentor_on'), image_on: hasKey_() && setting_('image_on'), survey_phase: settingValue_('survey_phase', 'pre'), progress: prog };
 }
@@ -274,7 +298,7 @@ function progress_(sid) {
   const secret = lastRow_('비밀', 1, sid), conn = lastRow_('연결', 1, sid), inv = lastRow_('발명', 2, sid);
   const surveys = sheet_('설문').getDataRange().getValues();
   let pre = false, post = false;
-  for (var i = 1; i < surveys.length; i++) if (surveys[i][1] === sid) { if (surveys[i][4] === 'pre') pre = true; if (surveys[i][4] === 'post') post = true; }
+  for (var i = 1; i < surveys.length; i++) if (sidStr_(surveys[i][1]) === sid) { if (surveys[i][4] === 'pre') pre = true; if (surveys[i][4] === 'post') post = true; }
   return {
     pre_done: pre, post_done: post,
     quiz_done: !!lastRow_('퀴즈', 1, sid),
@@ -285,8 +309,8 @@ function progress_(sid) {
     rounds: countRows_('로그', 1, sid, 4, 'observe'), images: countRows_('로그', 1, sid, 4, 'image'),
   };
 }
-function lastRow_(name, col, value) { const rows = sheet_(name).getDataRange().getValues(); for (var i = rows.length - 1; i >= 1; i--) if (String(rows[i][col]) === String(value)) return rows[i]; return null; }
-function countRows_(name, col, value, col2, value2) { const rows = sheet_(name).getDataRange().getValues(); let n = 0; for (var i = 1; i < rows.length; i++) if (String(rows[i][col]) === String(value) && (col2 === undefined || rows[i][col2] === value2)) n++; return n; }
+function lastRow_(name, col, value) { const rows = sheet_(name).getDataRange().getValues(); for (var i = rows.length - 1; i >= 1; i--) if (sidStr_(rows[i][col]) === String(value)) return rows[i]; return null; }
+function countRows_(name, col, value, col2, value2) { const rows = sheet_(name).getDataRange().getValues(); let n = 0; for (var i = 1; i < rows.length; i++) if (sidStr_(rows[i][col]) === String(value) && (col2 === undefined || rows[i][col2] === value2)) n++; return n; }
 
 // ───────────── 설문(사전·사후) ─────────────
 function saveSurvey(p) {
@@ -297,13 +321,13 @@ function saveSurvey(p) {
   if (missing > 0) return { error: '아직 답하지 않은 문항이 ' + missing + '개 있어요.' };
   function mean(prefix) { var v = []; ITEMS.forEach(function (r, i) { if (r[1] === prefix) v.push(scores[i]); }); return (v.reduce(function (a, b) { return a + b; }, 0) / v.length).toFixed(3); }
   const open = (p.open || []).map(sanitize_);
-  sheet_('설문').appendRow([now_(), p.student_id, p.class, p.seat, phase, p.gender || ''].concat(scores, [mean('CNI'), mean('CSE'), mean('AIP'), open[0] || '', open[1] || '', open[2] || '']));
+  sheet_('설문').appendRow([now_(), sidCell_(p.student_id), p.class, p.seat, phase, p.gender || ''].concat(scores, [mean('CNI'), mean('CSE'), mean('AIP'), open[0] || '', open[1] || '', open[2] || '']));
   return { ok: true, phase: phase };
 }
 
 // ───────────── 1차시 퀴즈 ─────────────
 function saveQuiz(p) {
-  sheet_('퀴즈').appendRow([now_(), p.student_id, p.class, p.seat, p.score, JSON.stringify(p.answers || []), sanitize_(p.teacher_sentence)]);
+  sheet_('퀴즈').appendRow([now_(), sidCell_(p.student_id), p.class, p.seat, p.score, JSON.stringify(p.answers || []), sanitize_(p.teacher_sentence)]);
   return { ok: true };
 }
 
@@ -341,7 +365,7 @@ function askMentor(p) {
   // 단계는 '생물별'로 셉니다(생물을 바꾸면 모습부터 다시). 전체 상한은 ROUND_CAP × 3
   const rows = sheet_('로그').getDataRange().getValues(); let total = 0, orgRound = 0;
   const tag = '"organism":' + JSON.stringify(String(p.organism || ''));
-  for (var r = 1; r < rows.length; r++) if (rows[r][1] === sid && rows[r][4] === 'observe') { total++; if (String(rows[r][6]).indexOf(tag) >= 0) orgRound++; }
+  for (var r = 1; r < rows.length; r++) if (sidStr_(rows[r][1]) === sid && rows[r][4] === 'observe') { total++; if (String(rows[r][6]).indexOf(tag) >= 0) orgRound++; }
   const round = orgRound + 1;
   if (round > APP.ROUND_CAP || total >= APP.ROUND_CAP * 3) return { praise: '정말 열심히 생각했어요!', info: '지금까지 알게 된 정보를 모으면 비밀 1문장이 돼요.', q1: '이제 내 말로 비밀을 정리해 볼까요?', keyword: String(p.organism || '') + ' 생체모방', capped: true, round: round, cap: APP.ROUND_CAP };
   const what = sanitize_(p.what), how = sanitize_(p.how), why = sanitize_(p.why);
@@ -371,7 +395,7 @@ function track(p) {
 }
 function saveSecret(p) {
   const version = countRows_('비밀', 1, p.student_id) + 1;
-  sheet_('비밀').appendRow([now_(), p.student_id, p.organism, sanitize_(p.what), sanitize_(p.how), sanitize_(p.why), sanitize_(p.secret), version]);
+  sheet_('비밀').appendRow([now_(), sidCell_(p.student_id), p.organism, sanitize_(p.what), sanitize_(p.how), sanitize_(p.why), sanitize_(p.secret), version]);
   return { ok: true, version: version };
 }
 
@@ -410,7 +434,7 @@ function connectProblem(p) {
   return out;
 }
 function saveChoice(p) {
-  sheet_('연결').appendRow([now_(), p.student_id, sanitize_(p.problem), JSON.stringify(p.candidates || []), sanitize_(p.chosen), sanitize_(p.reason)]);
+  sheet_('연결').appendRow([now_(), sidCell_(p.student_id), sanitize_(p.problem), JSON.stringify(p.candidates || []), sanitize_(p.chosen), sanitize_(p.reason)]);
   return { ok: true };
 }
 
@@ -463,13 +487,13 @@ function getImageData(fileId) {
 }
 function saveInvention(p) {
   const id = 'INV-' + p.student_id + '-' + Date.now().toString(36);
-  sheet_('발명').appendRow([now_(), id, p.student_id, p.class, sanitize_(p.organism), sanitize_(p.name), sanitize_(p.description), sanitize_(p.diff_note), p.file_id || '', p.image_count || 0]);
+  sheet_('발명').appendRow([now_(), id, sidCell_(p.student_id), p.class, sanitize_(p.organism), sanitize_(p.name), sanitize_(p.description), sanitize_(p.diff_note), p.file_id || '', p.image_count || 0]);
   return { ok: true, invention_id: id };
 }
 
 // ───────────── 5차시 지킴이 ─────────────
 function saveProtect(p) {
-  sheet_('지킴이').appendRow([now_(), p.student_id, p.class, sanitize_(p.species), sanitize_(p.lost_invention), sanitize_(p.promise), sanitize_(p.letter)]);
+  sheet_('지킴이').appendRow([now_(), sidCell_(p.student_id), p.class, sanitize_(p.species), sanitize_(p.lost_invention), sanitize_(p.promise), sanitize_(p.letter)]);
   return { ok: true };
 }
 
@@ -477,7 +501,7 @@ function saveProtect(p) {
 function getGallery(classNo) {
   classNo = parseInt(classNo, 10);
   const rows = sheet_('발명').getDataRange().getValues(); const latest = {};
-  for (var i = 1; i < rows.length; i++) if (parseInt(rows[i][3], 10) === classNo) latest[rows[i][2]] = rows[i];
+  for (var i = 1; i < rows.length; i++) if (parseInt(rows[i][3], 10) === classNo) latest[sidStr_(rows[i][2])] = rows[i];
   const reacts = sheet_('반응').getDataRange().getValues(); const count = {};
   for (var j = 1; j < reacts.length; j++) { const key = reacts[j][2] + '|' + reacts[j][3]; count[key] = (count[key] || 0) + 1; }
   return Object.keys(latest).map(function (sid) {
@@ -487,12 +511,12 @@ function getGallery(classNo) {
 }
 function react(p) {
   const rows = sheet_('반응').getDataRange().getValues();
-  for (var i = 1; i < rows.length; i++) if (rows[i][1] === p.student_id && rows[i][2] === p.invention_id && rows[i][3] === p.type) return { ok: false, msg: '이미 눌렀어요!' };
-  sheet_('반응').appendRow([now_(), p.student_id, p.invention_id, p.type === 'like' ? 'like' : 'curious']);
+  for (var i = 1; i < rows.length; i++) if (sidStr_(rows[i][1]) === String(p.student_id) && rows[i][2] === p.invention_id && rows[i][3] === p.type) return { ok: false, msg: '이미 눌렀어요!' };
+  sheet_('반응').appendRow([now_(), sidCell_(p.student_id), p.invention_id, p.type === 'like' ? 'like' : 'curious']);
   return { ok: true };
 }
 function saveReflect(p) {
-  sheet_('소감').appendRow([now_(), p.student_id, p.class, sanitize_(p.s_organism), sanitize_(p.s_secret), sanitize_(p.s_use), sanitize_(p.reflection), sanitize_(p.nature_is)]);
+  sheet_('소감').appendRow([now_(), sidCell_(p.student_id), p.class, sanitize_(p.s_organism), sanitize_(p.s_secret), sanitize_(p.s_use), sanitize_(p.reflection), sanitize_(p.nature_is)]);
   return { ok: true };
 }
 
@@ -524,13 +548,13 @@ function exportAll() {
   const head = sv[0];
   ['pre', 'post'].forEach(function (phase) {
     const out = [head.slice(1)];
-    for (var i = 1; i < sv.length; i++) if (sv[i][4] === phase) out.push(sv[i].slice(1));
+    for (var i = 1; i < sv.length; i++) if (sv[i][4] === phase) { const row = sv[i].slice(1); row[0] = sidStr_(row[0]); out.push(row); }
     const dst = ss_().getSheetByName('SPSS_' + (phase === 'pre' ? '사전' : '사후')) || ss_().insertSheet('SPSS_' + (phase === 'pre' ? '사전' : '사후'));
     dst.clear(); dst.getRange(1, 1, out.length, out[0].length).setValues(out); dst.setFrozenRows(1);
   });
   const logs = sheet_('로그').getDataRange().getValues(); const secrets = sheet_('비밀').getDataRange().getValues(); const per = {};
   for (var i = 1; i < logs.length; i++) {
-    const sid = logs[i][1]; per[sid] = per[sid] || { rounds: 0, connect: 0, images: 0, feedback: 0, rule: 0, search: 0, cls: logs[i][2] };
+    const sid = sidStr_(logs[i][1]); per[sid] = per[sid] || { rounds: 0, connect: 0, images: 0, feedback: 0, rule: 0, search: 0, cls: logs[i][2] };
     if (logs[i][4] === 'observe') per[sid].rounds++;
     if (logs[i][4] === 'connect') per[sid].connect++;
     if (logs[i][4] === 'image') per[sid].images++;
@@ -538,7 +562,7 @@ function exportAll() {
     if (logs[i][4] === 'search') per[sid].search++;
     if (String(logs[i][8]).indexOf('rule') === 0) per[sid].rule++;
   }
-  for (var j = 1; j < secrets.length; j++) { const sid = secrets[j][1]; per[sid] = per[sid] || { rounds: 0, connect: 0, images: 0, feedback: 0, rule: 0, search: 0, cls: '' }; per[sid].versions = Math.max(per[sid].versions || 0, secrets[j][7]); per[sid].record_len = (String(secrets[j][3]) + String(secrets[j][4]) + String(secrets[j][5])).length; }
+  for (var j = 1; j < secrets.length; j++) { const sid = sidStr_(secrets[j][1]); per[sid] = per[sid] || { rounds: 0, connect: 0, images: 0, feedback: 0, rule: 0, search: 0, cls: '' }; per[sid].versions = Math.max(per[sid].versions || 0, secrets[j][7]); per[sid].record_len = (String(secrets[j][3]) + String(secrets[j][4]) + String(secrets[j][5])).length; }
   const out = [['student_id', 'class', 'question_rounds', 'revisions', 'connect_requests', 'feedback_requests', 'image_generations', 'rule_mode_responses', 'search_clicks', 'record_length']];
   Object.keys(per).forEach(function (sid) { const v = per[sid]; out.push([sid, v.cls, v.rounds, Math.max((v.versions || 1) - 1, 0), v.connect, v.feedback, v.images, v.rule, v.search || 0, v.record_len || 0]); });
   const sh = ss_().getSheetByName('로그요약') || ss_().insertSheet('로그요약');
