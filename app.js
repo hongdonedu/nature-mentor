@@ -400,21 +400,25 @@
         <textarea id="reason" placeholder="예) 연잎은 물을 굴려 떨어뜨리니까 젖지 않는 신발에 어울려요">${esc(P.reason || '')}</textarea>
         <div class="actions"><button class="btn" id="saveChoice">연결 저장하기 ✅</button></div>
         <p class="tiny" style="margin-top:10px">④ 첫 스케치는 설계지(종이)에 그려요: 발명품 이름 · 흉내 낸 생물 · 비밀 · 모양</p></div>`;
+    let lastProblem = '', more = 0;
     el.querySelectorAll('.chip.ex').forEach((c) => c.onclick = () => { $('problem').value = c.textContent; });
     $('askConnect').onclick = async () => {
       const problem = $('problem').value.trim(); if (problem.length < 4) { toast('불편한 문제를 먼저 써요!'); return; }
+      more = problem === lastProblem ? more + 1 : 0; lastProblem = problem;
       $('askConnect').disabled = true; $('candCard').hidden = false; $('cands').innerHTML = '<div class="thinking">멘토가 생물 카드를 뒤적이고 있어요…</div>';
       try {
-        const r = await api('connect', { problem });
+        const r = await api('connect', { problem, more });
         if (r.redirect && !(r.candidates || []).length) { $('cands').innerHTML = `<div class="banner">${esc(r.redirect)}</div>`; }
         else {
           cands = r.candidates || [];
-          $('cands').innerHTML = cands.map((c, i) => `<button class="cand" data-i="${i}"><span class="ce">${photoTag(c.organism, 120)}</span><div><b>${esc(c.organism)}</b> <span class="tiny">${esc(c.feature)}</span><div>${esc(c.principle)}</div><div class="tiny">${esc(c.why_fit)}</div></div></button>`).join('');
+          $('cands').innerHTML = (r.tip ? `<div class="banner">💡 ${esc(r.tip)}</div>` : '') + cands.map((c, i) => `<button class="cand" data-i="${i}"><span class="ce">${photoTag(c.organism, 120)}</span><div><b>${esc(c.organism)}</b> <span class="tiny">${esc(c.feature)}</span><div>${esc(c.principle)}</div><div class="hint">🤔 ${esc(c.why_fit)}</div></div></button>`).join('');
+          $('askConnect').textContent = '🔄 다른 생물 후보 3개 더 보기';
           $('cands').querySelectorAll('.cand').forEach((b) => b.onclick = () => { chosen = cands[parseInt(b.dataset.i, 10)]; $('cands').querySelectorAll('.cand').forEach((x) => x.classList.toggle('sel', x === b)); $('whyCard').hidden = false; $('chosenBadge').textContent = (EMOJI[chosen.organism] || '🌿') + ' ' + chosen.organism; $('whyCard').scrollIntoView({ behavior: 'smooth' }); });
         }
       } catch (e) { $('cands').innerHTML = `<div class="banner">멘토가 잠깐 쉬고 있어요. 생물 카드에서 직접 골라도 돼요. (${esc(e.message)})</div>`; }
       $('askConnect').disabled = false;
     };
+    $('problem').addEventListener('input', () => { if ($('problem').value.trim() !== lastProblem) $('askConnect').textContent = '🤖 어울리는 생물 비밀 후보 받기'; });
     $('saveChoice').onclick = async () => {
       if (!chosen) { toast('생물을 먼저 골라요!'); return; } if ($('reason').value.trim().length < 5) { toast('"왜 이 생물?"을 한 문장 써요!'); return; }
       $('saveChoice').disabled = true;

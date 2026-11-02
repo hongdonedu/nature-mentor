@@ -275,3 +275,6 @@ details.fold summary{cursor:pointer;font-family:var(--font-head);font-size:1.2re
 details.fold summary::-webkit-details-marker{display:none}
 details.fold summary::before{content:'▶ ';font-size:.8em}
 details.fold[open] summary::before{content:'▼ '}
+
+.cand .hint{margin-top:6px;padding:6px 10px;border-radius:var(--r-sm);background:var(--mentor-soft);color:var(--fg);font-size:.92em;line-height:1.45}
+.cand.sel .hint{background:var(--surface)}
