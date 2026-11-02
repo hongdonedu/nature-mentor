@@ -118,8 +118,13 @@ const SYS_CONNECT = `너는 '네이처 멘토'야. 9살 어린이가 쓴 '생활
 규칙: 1) 반드시 아래 생물 카드 30개 중에서만 고른다(목록 밖 생물 금지). 각 생물의 '진짜 비밀'만 근거로 쓴다.
 {{LIST}}
 2) 응답은 JSON: {"candidates":[{"organism":"생물 이름(목록과 똑같이)","why_fit":"그 생물의 비밀이 이 문제를 어떻게 바꿀 수 있을지 떠올리게 하는 질문 한 문장(35자 이내, '~라면 어떨까요?' 꼴)"}, ... 3개]}
-3) 문제에 정말 잘 맞는 생물을 고른다. 비밀과 문제가 과학적으로 이어지지 않으면 고르지 않는다. 답을 정해 주지 말고 질문으로 떠올리게 한다.
+3) 문제에 정말 잘 맞는 생물을 고른다. 비밀과 문제가 과학적으로 이어지지 않으면 고르지 않는다. 비밀에 없는 능력을 지어내지 않는다. 답을 정해 주지 말고 질문으로 떠올리게 한다.
 4) 반드시 다정한 존댓말(~요, ~까요?). 반말 금지. 쉬운 3학년 말. 위험하거나 수업과 무관한 입력이면 candidates를 빈 배열로 주고 "redirect" 키에 활동으로 되돌리는 한 문장을 넣는다.`;
+const SYS_CONNECT_FIT = `너는 '네이처 멘토'야. 9살 어린이가 쓴 '생활 속 불편한 문제'와, 선생님이 고른 생물 카드 3개(각 생물의 진짜 비밀)를 줄게.
+각 생물마다, 그 비밀을 이 어린이의 문제에 어떻게 쓸 수 있을지 떠올리게 하는 질문 한 문장을 써.
+규칙: 1) 카드에 적힌 비밀만 근거로 쓴다. 비밀에 없는 능력(예: '소리를 흡수한다', '따뜻하게 해 준다')을 지어내지 않는다.
+2) 어린이 문제 속 물건·장소·때를 넣어 구체적으로 쓴다. 3) '~라면 어떨까요?' 꼴, 40자 이내, 다정한 존댓말. 반말 금지.
+4) 답(발명품)을 정해 주지 말고 떠올리게만 한다. JSON: {"fits":[{"organism":"카드 이름 그대로","why_fit":"질문"}]}`;
 const SYS_FEEDBACK = `너는 '네이처 멘토'야. 9살 어린이가 쓴 생체모방 발명품 설명문을 읽고 JSON으로 답해: {"praise":"구체적 칭찬 한 문장","check":"설명문에 '어떤 생물의 어떤 비밀을 어디에 썼는지'가 들어 있는지 다정하게 짚어 주는 한 문장","q":"발명품을 더 좋게 만들 질문 한 문장"}. 모든 문장 30자 이내, 쉬운 말, 존댓말, 답을 대신 써 주지 않는다.`;
 const IMAGE_PROMPT_PREFIX = `A friendly children's picture-book illustration (soft watercolor, pastel colors, clean white background, no text, no letters, no logos, no real people) of an invention designed by a 9-year-old child. Draw exactly what the child describes, keeping the part that imitates the organism clearly visible and cute. Child's description (Korean): `;
 
@@ -526,7 +531,7 @@ function ruleConnect_(problem, sid, more) {
   let tip = '';
   if (!list.length) tip = '문제를 "언제, 무엇이, 어떻게" 불편한지 조금 더 자세히 쓰면 더 잘 어울리는 생물을 찾아 줄게요. 예) 비 오는 날 운동화가 젖어서 발이 차가워요';
   const def = CONNECT_DEFAULT.slice(); const doff = hashStr_(sid + flat) % def.length;
-  def.slice(doff).concat(def.slice(0, doff)).forEach(function (p) { push({ organism: p[0], feature: p[1], principle: p[2], why_fit: '이 비밀이 내 문제를 어떻게 바꿀 수 있을지 상상해 봐요.' }); });
+  def.slice(doff).concat(def.slice(0, doff)).forEach(function (p) { push({ organism: p[0], feature: p[1], principle: p[2], why_fit: '이 비밀이 내 문제를 어떻게 바꿀 수 있을지 상상해 봐요.', generic: true }); });
   const start = (more * 3) % Math.max(list.length, 1);              // '다른 후보 보기'를 누르면 다음 3개
   const out = list.slice(start, start + 3); if (out.length < 3) out.push.apply(out, list.slice(0, 3 - out.length));
   return { candidates: out, mode: 'rule', tip: tip, type: ranked.length ? ranked[0].rule.id : 'none' };
@@ -535,26 +540,41 @@ function connectProblem(p) {
   const sid = p.student_id; const problem = sanitize_(p.problem);
   if (!problem) return { error: '불편한 문제를 먼저 써 주세요.' };
   if (isBlocked_(problem)) return { candidates: [], redirect: '그 이야기 말고, 학교나 집에서 불편했던 일을 써 볼까요?' };
-  let out = null, model = 'rule'; const t0 = Date.now();
+  let out = null, model = 'rule'; const t0 = Date.now(); const more = parseInt(p.more, 10) || 0;
+  const rule = ruleConnect_(problem, sid, more);
+  const names = ORGANISMS.map(function (r) { return r[0]; });
+  const curated = rule.type !== 'none' && rule.candidates.every(function (c) { return !c.generic; });
   if (hasKey_()) {
     try {
-      const names = ORGANISMS.map(function (r) { return r[0]; });
-      const list = ORGANISMS.map(function (r) { return '- ' + r[0] + ' [' + r[3] + ']: ' + r[4]; }).join('\n');
-      const schema = { type: 'OBJECT', properties: { candidates: { type: 'ARRAY', items: { type: 'OBJECT', properties: { organism: { type: 'STRING', enum: names }, why_fit: { type: 'STRING' } }, required: ['organism', 'why_fit'] } }, redirect: { type: 'STRING' } }, required: ['candidates'] };
-      const more = parseInt(p.more, 10) || 0;
-      out = parseJson_(gemini_(SYS_CONNECT.replace('{{LIST}}', list), '불편한 문제: ' + problem + (more ? '\n(' + (more + 1) + '번째 요청이에요. 앞에서와 다른 생물로 추천해 줘.)' : ''), schema), null); model = textModel_();
-      if (out && out.candidates && out.candidates.length) {
-        // 생물 이름은 카드 30개로 제한, 비밀(principle) 문장은 검증된 카드 문장으로 고정, AI는 '어울리는 까닭 질문'만 맡음
-        const fill = ruleConnect_(problem, sid, p.more).candidates; const seen = {};
-        out.candidates = out.candidates.filter(function (c) { if (names.indexOf(c.organism) < 0 || seen[c.organism]) return false; seen[c.organism] = 1; return true; })
-          .slice(0, 3).map(function (c) { const ref = cardFor_(c.organism, problem); return { organism: c.organism, feature: ref.feature, principle: ref.principle, why_fit: c.why_fit }; });
-        fill.forEach(function (c) { if (out.candidates.length < 3 && !seen[c.organism]) { seen[c.organism] = 1; out.candidates.push(c); } });
+      if (curated) {
+        // ① 문제 유형이 표에 있으면: 생물은 검증된 표에서, AI는 아이 문장에 맞춘 '어울리는 까닭 질문'만 씀
+        const picked = rule.candidates.map(function (c) { return c.organism; });
+        const cards = rule.candidates.map(function (c) { return '- ' + c.organism + ' [' + c.feature + ']: ' + c.principle; }).join('\n');
+        const schema = { type: 'OBJECT', properties: { fits: { type: 'ARRAY', items: { type: 'OBJECT', properties: { organism: { type: 'STRING', enum: picked }, why_fit: { type: 'STRING' } }, required: ['organism', 'why_fit'] } } }, required: ['fits'] };
+        const r = parseJson_(gemini_(SYS_CONNECT_FIT, '불편한 문제: ' + problem + '\n생물 카드:\n' + cards, schema), null);
+        const fit = {}; ((r && r.fits) || []).forEach(function (f) { if (f.why_fit) fit[f.organism] = String(f.why_fit).slice(0, 60); });
+        if (Object.keys(fit).length) {
+          out = { candidates: rule.candidates.map(function (c) { return { organism: c.organism, feature: c.feature, principle: c.principle, why_fit: fit[c.organism] || c.why_fit }; }), type: rule.type, source: 'table+ai' };
+          model = textModel_();
+        }
+      } else {
+        // ② 표에 없는 문제: AI가 카드 30개 안에서만 고르고, 비밀 문장은 카드 원문으로 고정
+        const list = ORGANISMS.map(function (r) { return '- ' + r[0] + ' [' + r[3] + ']: ' + r[4]; }).join('\n');
+        const schema = { type: 'OBJECT', properties: { candidates: { type: 'ARRAY', items: { type: 'OBJECT', properties: { organism: { type: 'STRING', enum: names }, why_fit: { type: 'STRING' } }, required: ['organism', 'why_fit'] } }, redirect: { type: 'STRING' } }, required: ['candidates'] };
+        const r = parseJson_(gemini_(SYS_CONNECT.replace('{{LIST}}', list), '불편한 문제: ' + problem + (more ? '\n(' + (more + 1) + '번째 요청이에요. 앞에서와 다른 생물로 추천해 줘.)' : ''), schema), null);
+        if (r && r.redirect && !(r.candidates || []).length) { out = { candidates: [], redirect: r.redirect }; model = textModel_(); }
+        else if (r && (r.candidates || []).length) {
+          const seen = {};
+          const cands = r.candidates.filter(function (c) { if (names.indexOf(c.organism) < 0 || seen[c.organism]) return false; seen[c.organism] = 1; return true; })
+            .slice(0, 3).map(function (c) { const ref = cardFor_(c.organism, problem); return { organism: c.organism, feature: ref.feature, principle: ref.principle, why_fit: String(c.why_fit).slice(0, 60) }; });
+          rule.candidates.forEach(function (c) { if (cands.length < 3 && !seen[c.organism]) { seen[c.organism] = 1; cands.push(c); } });
+          out = { candidates: cands, type: 'ai', source: 'ai' }; model = textModel_();
+        }
       }
     } catch (e) { out = null; model = 'rule(fallback: ' + String(e.message).slice(0, 40) + ')'; }
   }
-  if (!out || (!out.redirect && !(out.candidates || []).length)) out = ruleConnect_(problem, sid, p.more);
-  else if (out.redirect && !(out.candidates || []).length) out = { candidates: [], redirect: out.redirect };
-  log_(sid, p.class, p.seat, 'connect', (parseInt(p.more, 10) || 0) + 1, { problem: problem }, out, model, Date.now() - t0);
+  if (!out) out = rule;
+  log_(sid, p.class, p.seat, 'connect', more + 1, { problem: problem }, out, model, Date.now() - t0);
   return out;
 }
 function saveChoice(p) {
