@@ -260,7 +260,7 @@ function sanitize_(t) {
   t = String(t || '').trim().slice(0, APP.MAX_INPUT);
   return t.replace(/\d{2,3}-\d{3,4}-\d{4}/g, '[번호]').replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, '[메일]');
 }
-function isBlocked_(t) { t = String(t || ''); return BLOCK.some(function (w) { return t.indexOf(w) >= 0; }); }
+function isBlocked_(t) { t = String(t || '').replace(/아이디어/g, ''); return BLOCK.some(function (w) { return t.indexOf(w) >= 0; }); }
 const REDIRECT = { praise: '궁금한 게 많군요!', q1: '지금은 생물의 비밀을 찾아볼까요?', q2: '고른 생물의 어디가 특별해 보이나요?', hint: '사진에서 가장 눈에 띄는 부분을 다시 봐요.' };
 
 // ───────────── Gemini ─────────────
