@@ -278,3 +278,4 @@ details.fold[open] summary::before{content:'▼ '}
 
 .cand .hint{margin-top:6px;padding:6px 10px;border-radius:var(--r-sm);background:var(--mentor-soft);color:var(--fg);font-size:.92em;line-height:1.45}
 .cand.sel .hint{background:var(--surface)}
+.cklist{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}.cklist .ck{font-size:.85em;padding:3px 9px;border-radius:999px;background:var(--sunken);color:var(--fg-2)}.cklist .ck.ok{background:var(--mentor-soft);color:var(--fg)}

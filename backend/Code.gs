@@ -542,6 +542,78 @@ function saveChoice(p) {
 }
 
 // ───────────── 4차시 발명하기 ─────────────
+// ───── 발명 설명문 규칙 기반 피드백 (API 키가 없을 때) ─────
+// 세 문장 틀(이름 · 어떤 생물의 어떤 비밀 · 누가/언제 쓰는지)을 하나씩 확인하고, 요청할 때마다 다른 '더 좋게 만들 질문'을 준다.
+const SECRET_KW = {
+  '상어': ['돌기', '비늘', '저항', '빠르', '빨리', '물살', '헤엄', '수영', '매끈'], '물총새': ['부리', '뾰족', '소리', '저항', '빠르', '빨리'],
+  '도마뱀붙이(게코)': ['털', '붙', '발바닥', '미끄러지지', '안미끄', '접착', '달라'], '딱따구리': ['충격', '흡수', '머리', '부리', '안전', '쪼'],
+  '올빼미': ['깃털', '톱니', '조용', '소리', '소음'], '모기': ['침', '톱니', '가늘', '아프지', '안아', '따끔', '주사', '바늘'],
+  '혹등고래': ['혹', '지느러미', '흐름', '적은힘', '날개'], '흰개미': ['굴뚝', '바람', '공기', '온도', '시원', '환기'],
+  '거미': ['거미줄', '질기', '질긴', '튼튼', '끊어지지', '안끊', '가늘', '접착'], '나미브사막 딱정벌레': ['물방울', '모아', '모으', '흘려', '울퉁불퉁', '안개', '저장'],
+  '북극곰': ['털', '공기', '지방', '따뜻', '열', '보온'], '문어': ['빨판', '붙', '잡', '흡착'], '고양이': ['혀', '돌기', '빗', '털', '거친', '갈고리'],
+  '꿀벌': ['육각형', '벌집', '튼튼', '가벼', '가볍', '구조'], '박쥐': ['초음파', '소리', '메아리', '되돌아', '찾'], '반딧불이': ['빛', '밝', '발광', '에너지', '전기'],
+  '코끼리': ['코', '휘', '잡', '집어', '들어'], '오리': ['물갈퀴', '깃털', '기름', '헤엄', '밀어', '젖지', '방수', '안젖'], '돌고래': ['소리', '초음파', '되돌아', '찾', '음파'],
+  '몰포나비': ['비늘', '반사', '빛', '파란', '반짝'], '도꼬마리': ['갈고리', '가시', '걸려', '걸리', '붙', '찍찍이', '벨크로'],
+  '연잎': ['돌기', '왁스', '물방울', '굴러', '굴려', '방수', '젖지', '안젖', '스며들지', '흘러', '흘려', '먼지', '깨끗', '흡수하지'],
+  '단풍나무 씨앗': ['날개', '빙글', '돌며', '회전', '천천히', '날아'], '민들레 씨앗': ['갓털', '솜털', '낙하산', '바람', '멀리', '날아'],
+  '솔방울': ['비늘', '열리', '닫히', '닫혀', '습도', '축축', '마르'], '해바라기': ['해를', '햇빛', '따라', '태양'],
+  '선인장': ['가시', '줄기', '물을모', '저장', '아끼', '그늘'], '장미': ['가시', '지키', '찔'], '대나무': ['속이비', '마디', '가볍', '가벼', '휘', '부러지지', '튼튼', '단단', '질기', '질긴', '찢어지지', '안찢', '안찌'],
+  '파리지옥': ['닫', '잡', '순식간'],
+};
+const FEEDBACK_Q = [
+  '{org}의 비밀이 발명품의 어느 부분에 들어가나요? 그림에 화살표로 표시해 볼까요?',
+  '어떤 재료로 만들면 {org}의 비밀을 잘 살릴 수 있을까요?',
+  '이 발명품을 쓰는 순서를 1, 2, 3으로 말해 볼까요?',
+  '이 발명품이 정말 잘 되는지 어떻게 실험해 볼 수 있을까요?',
+  '이 발명품의 약한 점은 무엇이고, 어떻게 고치면 좋을까요?',
+  '다른 생물의 비밀을 하나 더 합친다면 무엇을 더하고 싶나요?',
+  '이 발명품이 자연과 환경에도 도움이 되려면 어떻게 만들까요?',
+  '친구가 처음 보면 무엇을 가장 궁금해할까요? 그 답을 한 문장 더 써 볼까요?',
+  '크기와 모양은 어떻게 하면 쓰기 편할까요?',
+];
+function orgAliases_(name) {
+  const base = String(name || '').split('(')[0].trim(); const al = [base];
+  const m = String(name || '').match(/\(([^)]+)\)/); if (m) al.push(m[1]);
+  base.split(' ').forEach(function (w) { if (w.length >= 2 && ['씨앗', '사막'].indexOf(w) < 0) { al.push(w); if (w.length >= 3) al.push(w.slice(0, 2)); } });
+  if (base === '올빼미') al.push('올뱀');
+  if (base === '도마뱀붙이') al.push('도마뱀'); if (base === '나미브사막 딱정벌레') al.push('딱정벌레');
+  return al.filter(function (a) { return a; });
+}
+function ruleFeedback_(p, desc, round, sid) {
+  const org = String(p.organism || ''); const short = org.split('(')[0];
+  const flat = desc.replace(/\s+/g, '');
+  const jamo = (desc.match(/[ㄱ-ㅎㅏ-ㅣ]/g) || []).length; const syl = (desc.match(/[가-힣]/g) || []).length;
+  if (jamo >= 4 && jamo > syl * 0.3) return { error: '글자가 섞여 있어요. 내 발명품을 세 문장으로 다시 써 볼까요?' };
+  const copied = /https?:|\+\d|한국경제|나무위키|위키백과|출처|기자|뉴스|☀|✔|•/.test(desc);
+  const mentions = function (o) { return orgAliases_(o).some(function (a) { return flat.indexOf(a.replace(/\s+/g, '')) >= 0; }); };
+  const hasOrg = org ? mentions(org) : false;
+  const others = ORGANISMS.map(function (r) { return r[0]; }).filter(function (n) { return n !== org && mentions(n); });
+  const kw = SECRET_KW[org] || [];
+  const hasSecret = kw.some(function (k) { return flat.indexOf(k) >= 0; }) || /비밀|특징|원리/.test(flat) && kw.some(function (k) { return flat.indexOf(k.slice(0, 2)) >= 0; });
+  const useText = flat.replace(/아이디어/g, '').replace(/날개/g, '');
+  const hasUse = /(때|날에|는날|운날|온날|사람|학생|친구|어린이|아이|어른|할머니|할아버지|우리|누구|쓰면|써요|써서|쓴다|쓸수|사용|신고|신으|신어|입고|메고|들고)/.test(useText);
+  const hasName = String(p.name || '').trim().length >= 2;
+  const sentences = Math.max(desc.split(/[.!?\n]+/).filter(function (s) { return s.trim().length >= 4; }).length, (desc.match(/(요|다)(?=[\s.!?]|$)/g) || []).length);
+  const ref = (ORGANISMS.filter(function (r) { return r[0] === org; })[0] || [])[4] || '';
+  let check;
+  if (copied) check = '인터넷 글을 옮기기보다, 내 말로 세 문장을 써 볼까요?';
+  else if (org && !hasOrg && others.length) check = '고른 생물은 \'' + short + '\'인데 설명에는 \'' + others[0].split('(')[0] + '\'이(가) 나와요. 흉내 낸 생물을 다시 확인해 볼까요?';
+  else if (!hasOrg) check = '어떤 생물을 흉내 냈는지 이름을 넣어 볼까요? (예: ' + (short || '○○') + '의 비밀을 흉내 냈어요)';
+  else if (!hasSecret) check = short + '의 어떤 비밀을 썼는지 적어 볼까요?' + (round >= 1 && ref ? ' 힌트: ' + ref : ' 2. 비밀 찾기에서 찾은 비밀을 떠올려 봐요.');
+  else if (!hasUse) check = '누가, 언제 쓰면 좋은지 한 문장 더 써 볼까요?';
+  else if (sentences < 3) check = '이름 · 생물의 비밀 · 쓰는 때, 세 문장으로 조금 더 자세히 써 볼까요?';
+  else check = '이름 · 생물의 비밀 · 쓰는 때가 모두 들어간 멋진 설명이에요!';
+  const praises = [];
+  if (hasOrg && hasSecret) praises.push(short + '의 비밀을 발명품과 잘 이었어요!', short + '의 비밀을 생활 속 문제에 쓴 생각이 멋져요!');
+  if (hasUse) praises.push('누가, 언제 쓰는지까지 생각한 점이 훌륭해요!');
+  if (sentences >= 4) praises.push('설명이 자세해서 발명품이 눈앞에 그려져요!');
+  if (hasName) praises.push('\'' + String(p.name).trim().slice(0, 12) + '\', 이름만 들어도 궁금해져요!');
+  if (!praises.length) praises.push('발명품을 생각해 낸 것부터 멋진 시작이에요!');
+  const praise = praises[(round + hashStr_(sid)) % praises.length];
+  const q = FEEDBACK_Q[(round + hashStr_(sid)) % FEEDBACK_Q.length].replace(/\{org\}/g, short || '생물');
+  return { praise: praise, check: check, q: q, mode: 'rule',
+    checklist: [{ k: '이름', ok: hasName }, { k: '생물', ok: hasOrg }, { k: '비밀', ok: hasOrg && hasSecret }, { k: '누가·언제', ok: hasUse }] };
+}
 function inventionFeedback(p) {
   const desc = sanitize_(p.description);
   if (desc.length < 10) return { error: '발명품을 세 문장으로 조금 더 자세히 써 주세요.' };
@@ -553,11 +625,9 @@ function inventionFeedback(p) {
       out = parseJson_(gemini_(SYS_FEEDBACK, '발명품 이름: ' + sanitize_(p.name) + '\n흉내 낸 생물: ' + sanitize_(p.organism) + '\n설명문: ' + desc, schema), null); model = textModel_();
     } catch (e) { out = null; }
   }
-  if (!out) {
-    const hasOrg = p.organism && desc.indexOf(String(p.organism).split('(')[0]) >= 0;
-    out = { praise: '발명품 이름이 멋져요!', check: hasOrg ? '어떤 생물을 흉내 냈는지 잘 썼어요.' : '어떤 생물의 비밀을 썼는지 한 문장 더 써 볼까요?', q: '이 발명품은 누가, 언제 쓰면 좋을까요?', mode: 'rule' };
-  }
-  log_(sid_(p), p.class, p.seat, 'feedback', 1, { description: desc }, out, model, Date.now() - t0);
+  const round = countRows_('로그', 1, sid_(p), 4, 'feedback');
+  if (!out) { out = ruleFeedback_(p, desc, round, sid_(p)); if (out.error) return out; }
+  log_(sid_(p), p.class, p.seat, 'feedback', round + 1, { description: desc }, out, model, Date.now() - t0);
   return out;
 }
 function sid_(p) { return p.student_id || (p.class + '-' + p.seat); }

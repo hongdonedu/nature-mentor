@@ -460,7 +460,7 @@
     $('fb').onclick = async () => {
       if ($('desc').value.trim().length < 10) { toast('설명문을 세 문장으로 써 봐요!'); return; }
       $('fb').disabled = true; $('fbOut').innerHTML = '<div class="mentor-bubble"><div class="mentor-avatar">🤖</div><div class="bubble thinking">읽고 있어요…</div></div>';
-      try { const r = await api('feedback', { name: $('invName').value, organism: $('invOrg').value, description: $('desc').value }); $('fbOut').innerHTML = `<div class="mentor-bubble"><div class="mentor-avatar">🤖</div><div class="bubble"><div class="praise">${esc(r.praise)}</div><ul class="qs"><li>✅ ${esc(r.check)}</li><li>❓ ${esc(r.q)}</li></ul></div></div>`; }
+      try { const r = await api('feedback', { name: $('invName').value, organism: $('invOrg').value, description: $('desc').value }); const cl = (r.checklist || []).map((c) => `<span class="ck ${c.ok ? 'ok' : ''}">${c.ok ? '✅' : '⬜'} ${esc(c.k)}</span>`).join(''); $('fbOut').innerHTML = `<div class="mentor-bubble"><div class="mentor-avatar">🤖</div><div class="bubble">${cl ? `<div class="cklist">${cl}</div>` : ''}<div class="praise">${esc(r.praise)}</div><ul class="qs"><li>📝 ${esc(r.check)}</li><li>❓ ${esc(r.q)}</li></ul></div></div>`; }
       catch (e) { $('fbOut').innerHTML = `<div class="banner">${esc(e.message)}</div>`; }
       $('fb').disabled = false;
     };
