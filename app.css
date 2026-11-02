@@ -252,3 +252,26 @@ canvas.sketch{width:100%;max-width:100%;background:#fff;border-radius:14px;borde
 .cand .ce img{width:100%;height:100%;object-fit:cover}
 .work .thumb img{width:100%;height:100%;object-fit:cover}
 @media (max-width:640px){.org-hero,.org-hero:has(.zoom){grid-template-columns:1fr}}
+
+/* ───── 박람회: 큰 갤러리 + 칭찬 댓글 ───── */
+.share-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.share-head h2{margin:0}
+.gallery.big{grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px}
+.gallery.big .thumb{aspect-ratio:4/3}
+.react{align-items:center}
+.cm-badge{font-size:.9rem;color:var(--fg-2);padding:0 6px}
+.react button i{font-style:normal}
+.cms{margin-top:8px;display:flex;flex-direction:column;gap:5px;max-height:220px;overflow:auto}
+.cm{background:var(--mentor-soft);border-radius:12px 12px 12px 4px;padding:6px 10px;font-size:.9rem;line-height:1.4}
+.cm b{color:#4a2fbf;margin-right:4px}
+.cm-more{border:0;background:none;color:var(--primary-ink);font-size:.85rem;text-align:left;padding:2px 0;text-decoration:underline}
+.cm-empty{padding:2px 0}
+.cm-chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
+.pchip{border:1.5px solid var(--line-strong);background:#fff;border-radius:999px;padding:3px 9px;font-size:.78rem}
+.pchip:hover{background:var(--hover)}
+.cm-row{display:flex;gap:6px;margin-top:6px}
+.cm-row input{flex:1;min-width:0;padding:8px 12px;font-size:.95rem}
+details.fold summary{cursor:pointer;font-family:var(--font-head);font-size:1.2rem;list-style:none}
+details.fold summary::-webkit-details-marker{display:none}
+details.fold summary::before{content:'▶ ';font-size:.8em}
+details.fold[open] summary::before{content:'▼ '}

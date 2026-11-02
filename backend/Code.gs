@@ -154,6 +154,7 @@ function handle_(p) {
       gallery: function () { return { items: getGallery(p.class) }; },
       image: function () { return { data_url: getImageData(p.file_id) }; },
       react: function () { return react(p); },
+      comment: function () { return comment(p); },
       protect: function () { return saveProtect(p); },
       reflect: function () { return saveReflect(p); },
       track: function () { return track(p); },
@@ -182,7 +183,7 @@ function sidStr_(v) {
   return String(v === null || v === undefined ? '' : v).replace(/^'/, '');
 }
 function sidCell_(sid) { return "'" + sidStr_(sid); }
-const SID_COL = { '학생': 1, '설문': 2, '퀴즈': 2, '로그': 2, '비밀': 2, '연결': 2, '발명': 3, '반응': 2, '지킴이': 2, '소감': 2 };
+const SID_COL = { '학생': 1, '설문': 2, '퀴즈': 2, '로그': 2, '비밀': 2, '연결': 2, '발명': 3, '반응': 2, '지킴이': 2, '소감': 2, '댓글': 2 };
 /** 한 번만 실행: 이미 날짜로 바뀐 학생 번호를 "반-번호" 텍스트로 되돌리고, 해당 열을 텍스트 서식으로 고정 */
 function fixStudentIds() {
   let changed = 0;
@@ -207,6 +208,7 @@ const SHEETS = {
   '연결': ['timestamp', 'student_id', 'problem', 'candidates', 'chosen', 'reason'],
   '발명': ['timestamp', 'invention_id', 'student_id', 'class', 'organism', 'name', 'description', 'diff_note', 'image_file_id', 'image_count'],
   '반응': ['timestamp', 'student_id', 'invention_id', 'type'],
+  '댓글': ['timestamp', 'student_id', 'class', 'target_sid', 'invention_id', 'text', 'hidden'],
   '지킴이': ['timestamp', 'student_id', 'class', 'species', 'lost_invention', 'promise', 'letter'],
   '소감': ['timestamp', 'student_id', 'class', 'sentence_organism', 'sentence_secret', 'sentence_use', 'reflection', 'nature_is'],
   '생물카드': ['name', 'type', 'emoji', 'look', 'secret_ref', 'invention_ref', 'photo_url'],
@@ -498,16 +500,38 @@ function saveProtect(p) {
 }
 
 // ───────────── 6차시 박람회 ─────────────
+function commentsByTarget_() {
+  const rows = sheet_('댓글').getDataRange().getValues(); const by = {};
+  for (var i = 1; i < rows.length; i++) {
+    if (String(rows[i][6]).toUpperCase() === 'TRUE') continue;   // 선생님이 hidden 칸에 TRUE → 숨김
+    const t = sidStr_(rows[i][3]); const from = sidStr_(rows[i][1]);
+    (by[t] = by[t] || []).push({ from_seat: from.split('-')[1], text: String(rows[i][5]), time: String(rows[i][0]).slice(5, 16) });
+  }
+  return by;
+}
 function getGallery(classNo) {
   classNo = parseInt(classNo, 10);
   const rows = sheet_('발명').getDataRange().getValues(); const latest = {};
   for (var i = 1; i < rows.length; i++) if (parseInt(rows[i][3], 10) === classNo) latest[sidStr_(rows[i][2])] = rows[i];
   const reacts = sheet_('반응').getDataRange().getValues(); const count = {};
   for (var j = 1; j < reacts.length; j++) { const key = reacts[j][2] + '|' + reacts[j][3]; count[key] = (count[key] || 0) + 1; }
+  const cm = commentsByTarget_();
   return Object.keys(latest).map(function (sid) {
     const r = latest[sid];
-    return { invention_id: r[1], student_id: sid, seat: sid.split('-')[1], organism: r[4], name: r[5], description: r[6], file_id: r[8], likes: count[r[1] + '|like'] || 0, curious: count[r[1] + '|curious'] || 0 };
+    return { invention_id: r[1], student_id: sid, seat: sid.split('-')[1], organism: r[4], name: r[5], description: r[6], file_id: r[8], likes: count[r[1] + '|like'] || 0, curious: count[r[1] + '|curious'] || 0, comments: cm[sid] || [] };
   }).sort(function (a, b) { return parseInt(a.seat, 10) - parseInt(b.seat, 10); });
+}
+const NEG = ['바보', '멍청', '못생', '싫어', '꺼져', '죽어', '짜증', '병신', '시발', '씨발', 'ㅅㅂ', 'ㅂㅅ', '똥', '구려', '별로', '이상해', '못했', '최악', '노잼', 'ㅗ'];
+/** 박람회 칭찬 댓글 */
+function comment(p) {
+  const text = sanitize_(p.text).slice(0, 80);
+  if (text.length < 2) return { error: '칭찬을 한 문장으로 써 주세요.' };
+  if (isBlocked_(text) || NEG.some(function (w) { return text.indexOf(w) >= 0; })) return { error: '친구가 기분 좋아지는 칭찬 말로 바꿔 써 볼까요? 😊' };
+  const target = sidStr_(p.target_sid);
+  if (!target) return { error: '작품을 다시 골라 주세요.' };
+  if (countRows_('댓글', 1, p.student_id) >= 40) return { error: '오늘은 칭찬을 정말 많이 했어요! 이제 발표를 들어요.' };
+  sheet_('댓글').appendRow([now_(), sidCell_(p.student_id), p.class, sidCell_(target), p.invention_id || '', text, '']);
+  return { ok: true, comments: commentsByTarget_()[target] || [] };
 }
 function react(p) {
   const rows = sheet_('반응').getDataRange().getValues();
@@ -536,7 +560,7 @@ function teacher_(p) {
   for (var j = 1; j < logs.length; j++) stage[logs[j][4]] = (stage[logs[j][4]] || 0) + 1;
   return {
     ok: true, students: students, pre: pre, post: post, quiz: sheet_('퀴즈').getLastRow() - 1, secrets: sheet_('비밀').getLastRow() - 1, connects: sheet_('연결').getLastRow() - 1,
-    inventions: sheet_('발명').getLastRow() - 1, protects: sheet_('지킴이').getLastRow() - 1, reflects: sheet_('소감').getLastRow() - 1,
+    inventions: sheet_('발명').getLastRow() - 1, comments: sheet_('댓글').getLastRow() - 1, protects: sheet_('지킴이').getLastRow() - 1, reflects: sheet_('소감').getLastRow() - 1,
     stage: stage, mentor_on: setting_('mentor_on'), image_on: setting_('image_on'), survey_phase: settingValue_('survey_phase', 'pre'),
     mentor_mode: hasKey_() ? 'gemini' : 'rule', sheet_url: ss_().getUrl(),
   };
@@ -554,7 +578,7 @@ function exportAll() {
   });
   const logs = sheet_('로그').getDataRange().getValues(); const secrets = sheet_('비밀').getDataRange().getValues(); const per = {};
   for (var i = 1; i < logs.length; i++) {
-    const sid = sidStr_(logs[i][1]); per[sid] = per[sid] || { rounds: 0, connect: 0, images: 0, feedback: 0, rule: 0, search: 0, cls: logs[i][2] };
+    const sid = sidStr_(logs[i][1]); per[sid] = per[sid] || { rounds: 0, connect: 0, images: 0, feedback: 0, rule: 0, search: 0, comments: 0, cls: logs[i][2] };
     if (logs[i][4] === 'observe') per[sid].rounds++;
     if (logs[i][4] === 'connect') per[sid].connect++;
     if (logs[i][4] === 'image') per[sid].images++;
@@ -563,8 +587,10 @@ function exportAll() {
     if (String(logs[i][8]).indexOf('rule') === 0) per[sid].rule++;
   }
   for (var j = 1; j < secrets.length; j++) { const sid = sidStr_(secrets[j][1]); per[sid] = per[sid] || { rounds: 0, connect: 0, images: 0, feedback: 0, rule: 0, search: 0, cls: '' }; per[sid].versions = Math.max(per[sid].versions || 0, secrets[j][7]); per[sid].record_len = (String(secrets[j][3]) + String(secrets[j][4]) + String(secrets[j][5])).length; }
-  const out = [['student_id', 'class', 'question_rounds', 'revisions', 'connect_requests', 'feedback_requests', 'image_generations', 'rule_mode_responses', 'search_clicks', 'record_length']];
-  Object.keys(per).forEach(function (sid) { const v = per[sid]; out.push([sid, v.cls, v.rounds, Math.max((v.versions || 1) - 1, 0), v.connect, v.feedback, v.images, v.rule, v.search || 0, v.record_len || 0]); });
+  const cms = sheet_('댓글').getDataRange().getValues();
+  for (var k = 1; k < cms.length; k++) { const sid = sidStr_(cms[k][1]); per[sid] = per[sid] || { rounds: 0, connect: 0, images: 0, feedback: 0, rule: 0, search: 0, comments: 0, cls: cms[k][2] }; per[sid].comments = (per[sid].comments || 0) + 1; }
+  const out = [['student_id', 'class', 'question_rounds', 'revisions', 'connect_requests', 'feedback_requests', 'image_generations', 'rule_mode_responses', 'search_clicks', 'comments_written', 'record_length']];
+  Object.keys(per).forEach(function (sid) { const v = per[sid]; out.push([sid, v.cls, v.rounds, Math.max((v.versions || 1) - 1, 0), v.connect, v.feedback, v.images, v.rule, v.search || 0, v.comments || 0, v.record_len || 0]); });
   const sh = ss_().getSheetByName('로그요약') || ss_().insertSheet('로그요약');
   sh.clear(); sh.getRange(1, 1, out.length, out[0].length).setValues(out);
   Logger.log('내보내기 완료: ' + ss_().getUrl());

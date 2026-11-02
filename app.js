@@ -134,7 +134,8 @@
       case 'feedback': return { praise: '발명품 이름이 멋져요!', check: '어떤 생물의 비밀을 썼는지 한 문장 더 써 볼까요?', q: '이 발명품은 누가, 언제 쓰면 좋을까요?', mode: 'rule' };
       case 'generateImage': return { error: '연습 모드에서는 그림 선생님이 쉬고 있어요. 내 스케치로 발표해요!', unavailable: true };
       case 'saveInvention': { const id = 'INV-' + sid + '-' + Date.now().toString(36); db.invention.push({ sid, id, cls: S.me.class, organism: p.organism, name: p.name, description: p.description, sketch: p.sketch_data || '', t: now }); save(); return { ok: true, invention_id: id }; }
-      case 'gallery': return { items: db.invention.filter((r) => String(r.cls) === String(p.class)).map((r) => ({ invention_id: r.id, student_id: r.sid, seat: r.sid.split('-')[1], organism: r.organism, name: r.name, description: r.description, sketch: r.sketch, likes: db.react.filter((x) => x.id === r.id && x.type === 'like').length, curious: db.react.filter((x) => x.id === r.id && x.type === 'curious').length })) };
+      case 'gallery': return { items: db.invention.filter((r) => String(r.cls) === String(p.class)).map((r) => ({ invention_id: r.id, student_id: r.sid, seat: r.sid.split('-')[1], organism: r.organism, name: r.name, description: r.description, sketch: r.sketch, likes: db.react.filter((x) => x.id === r.id && x.type === 'like').length, curious: db.react.filter((x) => x.id === r.id && x.type === 'curious').length, comments: (db.comment || []).filter((c) => c.target === r.sid).map((c) => ({ from_seat: c.sid.split('-')[1], text: c.text, time: c.t.slice(5, 16) })) })) };
+      case 'comment': { db.comment = db.comment || []; const t = String(p.text || '').trim(); if (t.length < 2) return { error: '칭찬을 한 문장으로 써 주세요.' }; db.comment.push({ sid, target: p.target_sid, text: t, t: now }); save(); return { ok: true, comments: db.comment.filter((c) => c.target === p.target_sid).map((c) => ({ from_seat: c.sid.split('-')[1], text: c.text, time: c.t.slice(5, 16) })) }; }
       case 'react': if (db.react.some((x) => x.sid === sid && x.id === p.invention_id && x.type === p.type)) return { ok: false, msg: '이미 눌렀어요!' }; db.react.push({ sid, id: p.invention_id, type: p.type }); save(); return { ok: true };
       case 'protect': db.protect.push({ sid, species: p.species, promise: p.promise, letter: p.letter, t: now }); save(); return { ok: true };
       case 'reflect': db.reflect.push({ sid, s: [p.s_organism, p.s_secret, p.s_use], reflection: p.reflection, nature_is: p.nature_is, t: now }); save(); return { ok: true };
@@ -506,26 +507,66 @@
   };
 
   // ── 6. 박람회 ──
+  const PRAISE = ['👍 아이디어가 멋져요!', '🌿 생물의 비밀을 잘 찾았어요!', '🎨 그림이 예뻐요!', '💡 생활에 정말 쓸모 있겠어요!', '❓ 어떻게 만드는지 궁금해요!'];
+  function commentList(cs, open) {
+    if (!cs.length) return '<div class="tiny cm-empty">아직 칭찬이 없어요.</div>';
+    const shown = open ? cs : cs.slice(-3);
+    return (cs.length > shown.length ? `<button class="cm-more" type="button">💬 칭찬 ${cs.length}개 모두 보기</button>` : '') +
+      shown.map((c) => `<div class="cm"><b>${esc(c.from_seat)}번</b> ${esc(c.text)}</div>`).join('');
+  }
   RENDER.share = async (el) => {
-    const P = S.progress;
-    el.innerHTML = `<div class="card accent"><h2>🏆 생체모방 발명 박람회 — ${S.me.class}반 갤러리</h2><p>친구 작품을 보고 <b>좋아요 👍 · 궁금해요 ❓</b> 스티커를 붙여요(작품마다 한 번씩). 발표는 3문장!</p>
-      <div class="ladder"><div><b>어떤 생물의</b></div><div><b>어떤 비밀을</b></div><div><b>어디에 썼어요</b></div></div></div>
-      <div class="gallery" id="gal"><div class="thinking">갤러리를 여는 중…</div></div>
-      <div class="card mentor" style="margin-top:18px"><h3>🎤 발표 3문장 + 오늘의 소감</h3>
-        <div class="row"><label style="flex:1">어떤 생물의 <input type="text" id="s1" placeholder="도마뱀붙이의" value="${esc(P.chosen ? P.chosen + '의' : '')}"></label><label style="flex:1">어떤 비밀을 <input type="text" id="s2" placeholder="끈끈한 발 비밀을"></label><label style="flex:1">어디에 썼어요 <input type="text" id="s3" placeholder="벽에 붙는 가방 걸이에 썼어요"></label></div>
+    const P = S.progress; let viewClass = S.me.class; const openAll = {};
+    el.innerHTML = `<div class="card accent"><div class="share-head"><h2>🏆 생체모방 발명 박람회</h2>
+        <div class="row"><label>반 보기 <select id="galClass">${(CFG.CLASSES || [1, 2, 3, 4]).map((c) => `<option value="${c}" ${c == S.me.class ? 'selected' : ''}>${c}반</option>`).join('')}</select></label><button class="btn ghost sm" id="galRefresh">🔄 새로고침</button></div></div>
+        <p style="margin:.3em 0">친구 작품을 쭉 둘러보고 <b>👍 좋아요 · ❓ 궁금해요</b> 스티커와 <b>💬 칭찬 댓글</b>을 남겨요. 칭찬은 친구가 기분 좋아지는 말로!</p>
+        <div class="tiny" id="galStat"></div></div>
+      <div class="gallery big" id="gal"><div class="thinking">갤러리를 여는 중…</div></div>
+      <details class="card mentor fold" id="reflectBox" style="margin-top:18px"><summary>🎤 발표 3문장 + 오늘의 소감 쓰기 <span class="tiny">(눌러서 열기)</span>${P.reflect_done ? ' <span class="badge">저장함</span>' : ''}</summary>
+        <div class="row" style="margin-top:10px"><label style="flex:1">어떤 생물의 <input type="text" id="s1" placeholder="도마뱀붙이의" value="${esc(P.chosen ? P.chosen + '의' : '')}"></label><label style="flex:1">어떤 비밀을 <input type="text" id="s2" placeholder="끈끈한 발 비밀을"></label><label style="flex:1">어디에 썼어요 <input type="text" id="s3" placeholder="벽에 붙는 가방 걸이에 썼어요"></label></div>
         <div class="field" style="margin-top:10px"><div class="q">가장 기억에 남는 것 한 문장</div><textarea id="refl"></textarea></div>
         <div class="field"><div class="q">자연은 나에게 ______ 선생님이다</div><input type="text" id="natureIs" placeholder="예) 비밀이 가득한"></div>
-        <div class="actions"><button class="btn" id="saveR">소감 저장하기 ✅</button>${P.reflect_done ? '<span class="badge">이미 저장했어요 · 다시 저장하면 새로 기록돼요</span>' : ''}</div></div>`;
+        <div class="actions"><button class="btn" id="saveR">소감 저장하기 ✅</button>${P.reflect_done ? '<span class="badge">이미 저장했어요 · 다시 저장하면 새로 기록돼요</span>' : ''}</div></details>`;
+    const bindCard = (card, w) => {
+      const box = card.querySelector('.cms');
+      const redraw = (cs) => { w.comments = cs; box.innerHTML = commentList(cs, openAll[w.student_id]); const m = box.querySelector('.cm-more'); if (m) m.onclick = () => { openAll[w.student_id] = true; redraw(w.comments); }; card.querySelector('.cm-count').textContent = cs.length; };
+      redraw(w.comments || []);
+      const inp = card.querySelector('.cm-input');
+      card.querySelectorAll('.pchip').forEach((c) => c.onclick = () => { inp.value = c.textContent; inp.focus(); });
+      const send = async () => {
+        const text = inp.value.trim(); if (text.length < 2) { toast('칭찬을 한 문장으로 써 주세요!'); inp.focus(); return; }
+        const btn = card.querySelector('.cm-send'); btn.disabled = true;
+        try { const r = await api('comment', { target_sid: w.student_id, invention_id: w.invention_id, text, _soft: true }); if (r.error) toast(r.error); else { inp.value = ''; redraw(r.comments || []); toast('칭찬을 보냈어요 💌'); } }
+        catch (e) { toast('보내지 못했어요: ' + e.message); }
+        btn.disabled = false;
+      };
+      if (card.querySelector('.cm-send')) { card.querySelector('.cm-send').onclick = send; inp.onkeydown = (e) => { if (e.key === 'Enter') send(); }; }
+      card.querySelectorAll('.react button').forEach((b) => b.onclick = async () => { try { const r = await api('react', { invention_id: w.invention_id, type: b.dataset.t, _soft: true }); toast(r.ok ? '마음을 전했어요 💌' : r.msg || r.error); if (r.ok) { const n = b.querySelector('i'); n.textContent = parseInt(n.textContent, 10) + 1; } } catch (e) { toast(e.message); } });
+    };
     const loadGallery = async () => {
+      $('gal').innerHTML = '<div class="thinking">갤러리를 여는 중…</div>';
       try {
-        const r = await api('gallery', { class: S.me.class }); const items = r.items || [];
+        const r = await api('gallery', { class: viewClass }); const items = r.items || [];
+        const nC = items.reduce((a, w) => a + (w.comments || []).length, 0);
+        $('galStat').textContent = `${viewClass}반 작품 ${items.length}개 · 칭찬 댓글 ${nC}개`;
         if (!items.length) { $('gal').innerHTML = '<div class="card soft">아직 올라온 작품이 없어요. 4. 발명하기에서 설계도를 올려요!</div>'; return; }
-        $('gal').innerHTML = items.map((w) => `<div class="work ${w.student_id === S.me.student_id ? 'mine' : ''}" data-id="${w.invention_id}"><div class="thumb" data-f="${esc(w.file_id || '')}">${w.sketch ? `<img src="${w.sketch}">` : photoTag(w.organism, 330)}</div><div class="wb"><b>${esc(w.name)}</b><span class="tiny">${w.seat}번 · ${EMOJI[w.organism] || ''} ${esc(w.organism)}</span><p>${esc(w.description)}</p><div class="react"><button data-t="like">👍 ${w.likes}</button><button data-t="curious">❓ ${w.curious}</button></div></div></div>`).join('');
-        $('gal').querySelectorAll('.react button').forEach((b) => b.onclick = async () => { const id = b.closest('.work').dataset.id; try { const r = await api('react', { invention_id: id, type: b.dataset.t, _soft: true }); toast(r.ok ? '마음을 전했어요 💌' : r.msg || r.error); if (r.ok) loadGallery(); } catch (e) { toast(e.message); } });
+        $('gal').innerHTML = items.map((w) => {
+          const mine = w.student_id === S.me.student_id;
+          return `<div class="work ${mine ? 'mine' : ''}" data-sid="${esc(w.student_id)}">
+            <div class="thumb" data-f="${esc(w.file_id || '')}">${w.sketch ? `<img src="${w.sketch}">` : photoTag(w.organism, 500)}</div>
+            <div class="wb"><b>${esc(w.name)}</b><span class="tiny">${esc(w.seat)}번 ${mine ? '(내 작품)' : ''} · ${EMOJI[w.organism] || ''} ${esc(w.organism)}</span><p>${esc(w.description)}</p>
+              <div class="react"><button data-t="like">👍 <i>${w.likes}</i></button><button data-t="curious">❓ <i>${w.curious}</i></button><span class="cm-badge">💬 <span class="cm-count">0</span></span></div>
+              <div class="cms"></div>
+              ${mine ? '<div class="tiny" style="margin-top:6px">내 작품에는 친구들이 칭찬을 달아 줘요 😊</div>' : `<div class="cm-chips">${PRAISE.map((t) => `<button type="button" class="pchip">${t}</button>`).join('')}</div>
+              <div class="cm-row"><input type="text" class="cm-input" maxlength="80" placeholder="${esc(w.seat)}번 친구에게 칭찬 한마디"><button class="btn sm cm-send" type="button">보내기</button></div>`}
+            </div></div>`;
+        }).join('');
+        items.forEach((w) => { const card = $('gal').querySelector(`.work[data-sid="${CSS.escape(w.student_id)}"]`); if (card) bindCard(card, w); });
         if (!LOCAL) $('gal').querySelectorAll('.thumb[data-f]').forEach(async (t) => { if (!t.dataset.f) return; try { const r = await api('image', { file_id: t.dataset.f }); if (r.data_url) t.innerHTML = `<img src="${r.data_url}">`; } catch (e) {} });
-        const mine = store.get('sketch_' + S.me.student_id, ''); const myCard = $('gal').querySelector('.work.mine .thumb'); if (mine && myCard && !myCard.querySelector('img') && !myCard.dataset.f) myCard.innerHTML = `<img src="${mine}">`;
+        const mineSk = store.get('sketch_' + S.me.student_id, ''); const myCard = $('gal').querySelector('.work.mine .thumb'); if (mineSk && myCard && !myCard.dataset.f) myCard.innerHTML = `<img src="${mineSk}">`;
       } catch (e) { $('gal').innerHTML = `<div class="banner">갤러리를 열지 못했어요: ${esc(e.message)}</div>`; }
     };
+    $('galClass').onchange = (e) => { viewClass = parseInt(e.target.value, 10); loadGallery(); };
+    $('galRefresh').onclick = loadGallery;
     loadGallery();
     $('saveR').onclick = async () => {
       if (!$('s1').value || !$('s2').value || !$('s3').value) { toast('발표 3문장을 모두 채워요!'); return; }
@@ -544,7 +585,7 @@
       const r = await api('teacher', { pin, op: 'summary', _soft: true }); if (r.error) { $('teacherBody').innerHTML = `<div class="banner">${esc(r.error)}</div>`; return; }
       $('teacherBody').innerHTML = `
         ${r.local ? '<div class="banner">연습 모드: config.js의 API_URL이 비어 있어 데이터가 이 브라우저에만 저장돼요. 백엔드를 배포한 뒤 URL을 넣으면 스프레드시트에 저장됩니다.</div>' : `<div class="banner ok">서버 연결됨 · 멘토: ${esc(r.mentor_mode)} · <a href="${esc(r.sheet_url)}" target="_blank">데이터 스프레드시트 열기 ↗</a></div>`}
-        <div class="kpi"><div><b>${r.students}</b><small>접속 학생</small></div><div><b>${r.pre}</b><small>사전 검사</small></div><div><b>${r.post}</b><small>사후 검사</small></div><div><b>${r.quiz}</b><small>퀴즈</small></div><div><b>${r.secrets}</b><small>비밀 저장</small></div><div><b>${r.connects}</b><small>연결</small></div><div><b>${r.inventions}</b><small>발명 설계도</small></div><div><b>${r.protects}</b><small>지킴이</small></div><div><b>${r.reflects}</b><small>소감</small></div></div>
+        <div class="kpi"><div><b>${r.students}</b><small>접속 학생</small></div><div><b>${r.pre}</b><small>사전 검사</small></div><div><b>${r.post}</b><small>사후 검사</small></div><div><b>${r.quiz}</b><small>퀴즈</small></div><div><b>${r.secrets}</b><small>비밀 저장</small></div><div><b>${r.connects}</b><small>연결</small></div><div><b>${r.inventions}</b><small>발명 설계도</small></div><div><b>${r.comments ?? 0}</b><small>칭찬 댓글</small></div><div><b>${r.protects}</b><small>지킴이</small></div><div><b>${r.reflects}</b><small>소감</small></div></div>
         <h3 style="margin-top:16px">설정</h3>
         <div class="switch"><label><input type="checkbox" id="tMentor" ${r.mentor_on ? 'checked' : ''}> AI 멘토 켜기 (끄면 "쉬는 시간" 안내)</label></div>
         <div class="switch"><label><input type="checkbox" id="tImage" ${r.image_on ? 'checked' : ''}> AI 그림 생성 켜기 (API 키 있을 때만 동작)</label></div>
