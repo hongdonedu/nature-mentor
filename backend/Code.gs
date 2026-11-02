@@ -269,19 +269,24 @@ function gemini_(systemText, userText, schema) {
   const body = {
     system_instruction: { parts: [{ text: systemText }] },
     contents: [{ role: 'user', parts: [{ text: userText }] }],
-    generationConfig: { temperature: 0.7, maxOutputTokens: 500 },
+    // gemini-2.5-flash는 기본으로 '생각(thinking)'에 출력 토큰을 먼저 써서 짧은 한도에서 답이 잘림 → 생각 끄기 + 한도 넉넉히
+    generationConfig: { temperature: 0.7, maxOutputTokens: 1024, thinkingConfig: { thinkingBudget: 0 } },
     safetySettings: ['HARM_CATEGORY_HARASSMENT', 'HARM_CATEGORY_HATE_SPEECH', 'HARM_CATEGORY_SEXUALLY_EXPLICIT', 'HARM_CATEGORY_DANGEROUS_CONTENT'].map(function (c) { return { category: c, threshold: 'BLOCK_LOW_AND_ABOVE' }; }),
   };
   if (schema) { body.generationConfig.responseMimeType = 'application/json'; body.generationConfig.responseSchema = schema; }
   const res = UrlFetchApp.fetch(url, { method: 'post', contentType: 'application/json', payload: JSON.stringify(body), muteHttpExceptions: true });
   if (res.getResponseCode() !== 200) throw new Error('Gemini ' + res.getResponseCode() + ': ' + res.getContentText().slice(0, 200));
-  const parts = (((JSON.parse(res.getContentText()).candidates || [])[0] || {}).content || {}).parts || [];
-  return parts.map(function (p) { return p.text || ''; }).join('');
+  const cand = (JSON.parse(res.getContentText()).candidates || [])[0] || {};
+  const parts = (cand.content || {}).parts || [];
+  const text = parts.filter(function (p) { return !p.thought; }).map(function (p) { return p.text || ''; }).join('');
+  if (!text) throw new Error('Gemini empty: ' + (cand.finishReason || 'no candidate'));
+  return text;
 }
 function parseJson_(text, fallback) {
   try { return JSON.parse(text); } catch (e) { const m = String(text).match(/\{[\s\S]*\}/); if (m) { try { return JSON.parse(m[0]); } catch (e2) {} } return fallback; }
 }
 function log_(sid, cls, seat, stage, round, input, output, model, ms) {
+  if (output && output.mode === 'rule' && String(model).indexOf('rule') !== 0) model = 'rule(fallback)';   // AI 응답이 실패해 규칙 답이 나간 경우를 정확히 기록
   sheet_('로그').appendRow([now_(), sidCell_(sid), cls, seat, stage, round, JSON.stringify(input), JSON.stringify(output), model, ms]);
 }
 
@@ -383,7 +388,7 @@ function askMentor(p) {
       const schema = { type: 'OBJECT', properties: { praise: { type: 'STRING' }, info: { type: 'STRING' }, q1: { type: 'STRING' }, keyword: { type: 'STRING' } }, required: ['praise', 'info', 'q1', 'keyword'] };
       out = parseJson_(gemini_(sys, user, schema), null); model = textModel_();
       if (out) out.level = level;
-    } catch (e) { out = null; model = 'rule(fallback)'; }
+    } catch (e) { out = null; model = 'rule(fallback: ' + String(e.message).slice(0, 40) + ')'; }
   }
   if (!out || !out.info) out = ruleMentor_(p.organism, what, how, why, level);
   log_(sid, cls, seat, 'observe', round, input, out, model, Date.now() - t0);
@@ -528,9 +533,10 @@ function connectProblem(p) {
     try {
       const list = getOrganisms().map(function (o) { return o.name + '(' + o.look + ')'; }).join(', ');
       const schema = { type: 'OBJECT', properties: { candidates: { type: 'ARRAY', items: { type: 'OBJECT', properties: { organism: { type: 'STRING' }, feature: { type: 'STRING' }, principle: { type: 'STRING' }, why_fit: { type: 'STRING' } }, required: ['organism', 'feature', 'principle', 'why_fit'] } }, redirect: { type: 'STRING' } }, required: ['candidates'] };
-      out = parseJson_(gemini_(SYS_CONNECT.replace('{{LIST}}', list), '불편한 문제: ' + problem, schema), null); model = textModel_();
+      const more = parseInt(p.more, 10) || 0;
+      out = parseJson_(gemini_(SYS_CONNECT.replace('{{LIST}}', list), '불편한 문제: ' + problem + (more ? '\n(' + (more + 1) + '번째 요청이에요. 앞에서와 다른 생물로 추천해 줘.)' : ''), schema), null); model = textModel_();
       if (out && out.candidates) out.candidates = out.candidates.slice(0, 3);
-    } catch (e) { out = null; model = 'rule(fallback)'; }
+    } catch (e) { out = null; model = 'rule(fallback: ' + String(e.message).slice(0, 40) + ')'; }
   }
   if (!out || !out.candidates || !out.candidates.length) out = ruleConnect_(problem, sid, p.more);
   log_(sid, p.class, p.seat, 'connect', (parseInt(p.more, 10) || 0) + 1, { problem: problem }, out, model, Date.now() - t0);
@@ -619,14 +625,17 @@ function inventionFeedback(p) {
   if (desc.length < 10) return { error: '발명품을 세 문장으로 조금 더 자세히 써 주세요.' };
   if (isBlocked_(desc)) return { error: '그 내용 말고, 생물의 비밀을 쓴 발명품을 써 볼까요?' };
   let out = null; const t0 = Date.now(); let model = 'rule';
+  const round = countRows_('로그', 1, sid_(p), 4, 'feedback');
+  const rule = ruleFeedback_(p, desc, round, sid_(p)); if (rule.error) return rule;   // 글자 섞임 등은 AI 전에 거름
   if (hasKey_()) {
     try {
       const schema = { type: 'OBJECT', properties: { praise: { type: 'STRING' }, check: { type: 'STRING' }, q: { type: 'STRING' } }, required: ['praise', 'check', 'q'] };
-      out = parseJson_(gemini_(SYS_FEEDBACK, '발명품 이름: ' + sanitize_(p.name) + '\n흉내 낸 생물: ' + sanitize_(p.organism) + '\n설명문: ' + desc, schema), null); model = textModel_();
-    } catch (e) { out = null; }
+      const missing = rule.checklist.filter(function (c) { return !c.ok; }).map(function (c) { return c.k; }).join(', ');
+      out = parseJson_(gemini_(SYS_FEEDBACK, '발명품 이름: ' + sanitize_(p.name) + '\n흉내 낸 생물: ' + sanitize_(p.organism) + '\n설명문: ' + desc + '\n(빠진 요소: ' + (missing || '없음') + ' / ' + (round + 1) + '번째 피드백 요청 — 앞과 다른 질문으로)', schema), null); model = textModel_();
+      if (out && out.praise && out.q) out.checklist = rule.checklist; else out = null;
+    } catch (e) { out = null; model = 'rule(fallback: ' + String(e.message).slice(0, 40) + ')'; }
   }
-  const round = countRows_('로그', 1, sid_(p), 4, 'feedback');
-  if (!out) { out = ruleFeedback_(p, desc, round, sid_(p)); if (out.error) return out; }
+  if (!out) out = rule;
   log_(sid_(p), p.class, p.seat, 'feedback', round + 1, { description: desc }, out, model, Date.now() - t0);
   return out;
 }
