@@ -92,7 +92,7 @@
   // ───────── 상태 ─────────
   const sess = { get: (k) => { try { const v = sessionStorage.getItem('nm_' + k); return v ? JSON.parse(v) : null; } catch (e) { return null; } }, set: (k, v) => { try { sessionStorage.setItem('nm_' + k, JSON.stringify(v)); } catch (e) {} } };
   // 같은 크롬북을 여러 학생이 쓰므로: 이 탭에서 확인한 번호만 자동 사용, 새로 열면 반·번호를 다시 확인
-  const S = { me: sess.get('me'), lastMe: store.get('me', null), progress: {}, online: null, mode: 'rule', imageOn: false, mentorOn: true, phase: 'pre', view: 'home', orgs: ORGANISMS, gallery: [] };
+  const S = { me: sess.get('me'), lastMe: store.get('me', null), progress: {}, online: null, mode: 'rule', imageOn: false, imageCap: 7, mentorOn: true, phase: 'pre', view: 'home', orgs: ORGANISMS, gallery: [] };
   let toastT;
   function toast(m, ms = 2600) { const t = $('toast'); t.textContent = m; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => (t.hidden = true), ms); }
 
@@ -196,7 +196,7 @@
     try {
       S.me = { student_id: cls + '-' + seat, class: cls, seat };
       const r = await api('login', { class: cls, seat });
-      S.progress = r.progress || {}; S.imageOn = !!r.image_on; S.mentorOn = r.mentor_on !== false; S.phase = r.survey_phase || 'pre';
+      S.progress = r.progress || {}; S.imageOn = !!r.image_on; S.imageCap = r.image_cap || S.imageCap; S.mentorOn = r.mentor_on !== false; S.phase = r.survey_phase || 'pre';
       store.set('me', S.me); sess.set('me', S.me);
       $('clsLabel').textContent = `${cls}반 ${seat}번`; $('clsChip').classList.remove('unset');
       $('loginModal').hidden = true; toast(`안녕하세요, ${cls}반 ${seat}번 발명가! 🌿`);
@@ -230,7 +230,7 @@
       <div class="grid">${VIEWS.map((v) => `<button class="mission ${doneOf(v) ? 'done' : ''}" data-go="${v.id}"><span class="mi-ico">${v.ico}</span><b>${v.n}. ${v.t}</b><small>${v.sub}</small></button>`).join('')}</div>`;
     el.querySelector('[data-go="login"]') && (el.querySelector('[data-go="login"]').onclick = (e) => { e.stopPropagation(); openLogin(); });
     $('homeTeacher').onclick = () => $('teacherBtn').click();
-    $('howBtn').onclick = () => { $('teacherModal').hidden = false; $('teacherBody').innerHTML = `<h3>❓ 놀이 방법</h3><ol style="line-height:1.9"><li>위쪽 <b>🏫 반·번호</b>를 고르고 들어가요 (이름은 안 써요).</li><li>왼쪽 <b>수업 순서</b> 0번부터 차례로 해요. 끝난 미션엔 ✓가 붙어요.</li><li><b>네이처 멘토</b>는 답을 주지 않아요. 멘토의 질문에 답하며 생물의 비밀을 내 말로 써요.</li><li>발명하기에서는 <b>내 스케치가 먼저</b>, AI 그림은 참고(3번까지)!</li><li>박람회에서 친구 작품에 👍 ❓ 스티커를 붙이고 3문장으로 발표해요.</li><li>막히면 손을 들어 선생님을 불러요 🙋</li></ol>`; };
+    $('howBtn').onclick = () => { $('teacherModal').hidden = false; $('teacherBody').innerHTML = `<h3>❓ 놀이 방법</h3><ol style="line-height:1.9"><li>위쪽 <b>🏫 반·번호</b>를 고르고 들어가요 (이름은 안 써요).</li><li>왼쪽 <b>수업 순서</b> 0번부터 차례로 해요. 끝난 미션엔 ✓가 붙어요.</li><li><b>네이처 멘토</b>가 생물 정보를 조금씩 알려 주고 질문해요. 멘토 말을 참고해 생물의 비밀을 <b>내 말로</b> 써요.</li><li>발명하기에서는 <b>내 스케치가 먼저</b>, AI 그림은 참고(${S.imageCap}번까지)!</li><li>박람회에서 친구 작품에 👍 ❓ 스티커를 붙이고 3문장으로 발표해요.</li><li>막히면 손을 들어 선생님을 불러요 🙋</li></ol>`; };
   };
 
   // ── 설문(사전/사후) ──
@@ -439,7 +439,7 @@
         <div class="actions"><button class="btn violet" id="fb">🤖 멘토 피드백 받기</button></div><div id="fbOut" style="margin-top:12px"></div></div>
       <div class="card"><h3>③ 내 스케치 ↔ AI 그림 비교</h3><p class="muted">먼저 내 생각대로 그려요. 그다음 AI 그림을 보고 <b>다른 점 1가지</b>를 찾아요. AI 그림은 참고일 뿐, 내 설계도가 진짜 발명품!</p>
         <div class="compare"><div><div class="palette" id="palette"></div><canvas class="sketch" id="sketch" width="600" height="600"></canvas><div class="actions"><button class="btn ghost sm" id="undo">↩ 되돌리기</button><button class="btn ghost sm" id="clear">🧽 지우기</button></div></div>
-          <div><div class="box" id="aiBox">${S.imageOn ? '설명문을 쓰고 아래 버튼을 누르면<br>AI 그림이 여기에 나와요 🎨' : '지금은 그림 선생님이 쉬고 있어요.<br>내 스케치로 발표해요 ✏️'}</div><div class="actions"><button class="btn gold" id="gen" ${S.imageOn ? '' : 'disabled'}>🎨 AI 그림 그리기 <span class="tiny" id="genCnt">(${imgCount}/3)</span></button></div></div></div>
+          <div><div class="box" id="aiBox">${S.imageOn ? '설명문을 쓰고 아래 버튼을 누르면<br>AI 그림이 여기에 나와요 🎨' : '지금은 그림 선생님이 쉬고 있어요.<br>내 스케치로 발표해요 ✏️'}</div><div class="actions"><button class="btn gold" id="gen" ${S.imageOn ? '' : 'disabled'}>🎨 AI 그림 그리기 <span class="tiny" id="genCnt">(${imgCount}/${S.imageCap})</span></button></div></div></div>
         <div class="field" style="margin-top:12px"><div class="q">AI 그림과 내 스케치, 다른 점 1가지와 고칠 점</div><textarea id="diff" placeholder="예) AI 그림은 바닥에 돌기가 없어요. 내 설계도에는 연잎처럼 작은 돌기를 그렸어요."></textarea></div>
         <div class="actions"><button class="btn big" id="saveInv">④ 설계도 저장하고 갤러리에 올리기 🏆</button></div></div>`;
     const cnt = () => { $('descCnt').textContent = $('desc').value.length + '자'; }; cnt(); $('desc').oninput = cnt;
@@ -609,8 +609,8 @@
   async function boot() {
     renderNav();
     if (LOCAL) setNet(false, '연습 모드(서버 없음)');
-    else { try { const r = await api('ping'); S.mode = r.mentor; S.imageOn = !!r.image_on; setNet(true, r.mentor === 'gemini' ? 'AI 멘토 연결됨' : '연결됨(규칙 멘토)'); } catch (e) { setNet(false, '서버 연결 안 됨'); } }
-    if (S.me) { $('clsLabel').textContent = `${S.me.class}반 ${S.me.seat}번`; $('clsChip').classList.remove('unset'); try { const r = await api('login', { class: S.me.class, seat: S.me.seat }); S.progress = r.progress || {}; S.imageOn = !!r.image_on; S.phase = r.survey_phase || 'pre'; } catch (e) {} }
+    else { try { const r = await api('ping'); S.mode = r.mentor; S.imageOn = !!r.image_on; S.imageCap = r.image_cap || S.imageCap; setNet(true, r.mentor === 'gemini' ? 'AI 멘토 연결됨' : '연결됨(규칙 멘토)'); } catch (e) { setNet(false, '서버 연결 안 됨'); } }
+    if (S.me) { $('clsLabel').textContent = `${S.me.class}반 ${S.me.seat}번`; $('clsChip').classList.remove('unset'); try { const r = await api('login', { class: S.me.class, seat: S.me.seat }); S.progress = r.progress || {}; S.imageOn = !!r.image_on; S.imageCap = r.image_cap || S.imageCap; S.phase = r.survey_phase || 'pre'; } catch (e) {} }
     const h = location.hash.replace('#', '');
     go(VIEWS.some((v) => v.id === h) ? h : 'home');
     if (!S.me) openLogin();

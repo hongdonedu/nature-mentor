@@ -20,7 +20,7 @@
 const APP = {
   SHEET_NAME: '네이처멘토_데이터',
   ROUND_CAP: 6,       // 학생 1인당 멘토 질문 상한(관찰 단계)
-  IMAGE_CAP: 3,       // 학생 1인당 그림 생성 상한
+  IMAGE_CAP: 7,       // 학생 1인당 그림 생성 상한
   MAX_INPUT: 400,
   TEXT_MODEL_DEFAULT: 'gemini-2.5-flash',
   IMAGE_MODEL_DEFAULT: 'gemini-2.5-flash-image',
@@ -143,7 +143,7 @@ function handle_(p) {
   try {
     const a = String(p.action || '');
     const map = {
-      ping: function () { return { ok: true, mentor: hasKey_() ? 'gemini' : 'rule', image_on: hasKey_() && setting_('image_on'), mentor_on: setting_('mentor_on') }; },
+      ping: function () { return { ok: true, mentor: hasKey_() ? 'gemini' : 'rule', image_on: hasKey_() && setting_('image_on'), image_cap: APP.IMAGE_CAP, mentor_on: setting_('mentor_on') }; },
       organisms: function () { return { organisms: getOrganisms() }; },
       items: function () { return { items: ITEMS.map(function (r) { return { code: r[0], scale: r[1], factor: r[2], text: r[3] }; }), open: OPEN_Q }; },
       login: function () { return login(p.class, p.seat); },
@@ -305,7 +305,7 @@ function login(classNo, seatNo) {
   for (var i = 1; i < rows.length; i++) if (sidStr_(rows[i][0]) === sid) { sh.getRange(i + 1, 5).setValue(now_()); found = true; break; }
   if (!found) sh.appendRow([sidCell_(sid), classNo, seatNo, now_(), now_()]);
   const prog = progress_(sid);
-  return { student_id: sid, class: classNo, seat: seatNo, mentor_on: setting_('mentor_on'), image_on: hasKey_() && setting_('image_on'), survey_phase: settingValue_('survey_phase', 'pre'), progress: prog };
+  return { student_id: sid, class: classNo, seat: seatNo, mentor_on: setting_('mentor_on'), image_on: hasKey_() && setting_('image_on'), image_cap: APP.IMAGE_CAP, survey_phase: settingValue_('survey_phase', 'pre'), progress: prog };
 }
 function progress_(sid) {
   const secret = lastRow_('비밀', 1, sid), conn = lastRow_('연결', 1, sid), inv = lastRow_('발명', 2, sid);
