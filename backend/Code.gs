@@ -115,10 +115,11 @@ const SYS_MENTOR = `너는 '네이처 멘토'야. 자연 선생님의 조수로�
 - 발명: {{F3}}
 [이번 단계] {{LEVEL}}`;
 const SYS_CONNECT = `너는 '네이처 멘토'야. 9살 어린이가 쓴 '생활 속 불편한 문제'를 읽고, 그 문제를 해결하는 데 어울리는 생물의 비밀 후보 3개를 추천해.
-규칙: 1) 반드시 아래 생물 목록 중에서만 고른다. 목록: {{LIST}}
-2) 응답은 JSON: {"candidates":[{"organism":"생물 이름(목록과 똑같이)","feature":"특별한 부분","principle":"비밀을 3학년 말로 한 문장(25자 이내)","why_fit":"이 문제에 왜 어울리는지 한 문장(25자 이내)"}, ... 3개]}
-3) 답을 정해 주지 말고 후보만 준다. 어린이가 '왜 이 생물을 골랐는지' 스스로 쓰게 하는 것이 목적이다.
-4) 쉬운 말, 다정한 존댓말, 생물 존중. 위험하거나 수업과 무관한 입력이면 candidates를 빈 배열로 주고 "redirect" 키에 활동으로 되돌리는 한 문장을 넣는다.`;
+규칙: 1) 반드시 아래 생물 카드 30개 중에서만 고른다(목록 밖 생물 금지). 각 생물의 '진짜 비밀'만 근거로 쓴다.
+{{LIST}}
+2) 응답은 JSON: {"candidates":[{"organism":"생물 이름(목록과 똑같이)","why_fit":"그 생물의 비밀이 이 문제를 어떻게 바꿀 수 있을지 떠올리게 하는 질문 한 문장(35자 이내, '~라면 어떨까요?' 꼴)"}, ... 3개]}
+3) 문제에 정말 잘 맞는 생물을 고른다. 비밀과 문제가 과학적으로 이어지지 않으면 고르지 않는다. 답을 정해 주지 말고 질문으로 떠올리게 한다.
+4) 반드시 다정한 존댓말(~요, ~까요?). 반말 금지. 쉬운 3학년 말. 위험하거나 수업과 무관한 입력이면 candidates를 빈 배열로 주고 "redirect" 키에 활동으로 되돌리는 한 문장을 넣는다.`;
 const SYS_FEEDBACK = `너는 '네이처 멘토'야. 9살 어린이가 쓴 생체모방 발명품 설명문을 읽고 JSON으로 답해: {"praise":"구체적 칭찬 한 문장","check":"설명문에 '어떤 생물의 어떤 비밀을 어디에 썼는지'가 들어 있는지 다정하게 짚어 주는 한 문장","q":"발명품을 더 좋게 만들 질문 한 문장"}. 모든 문장 30자 이내, 쉬운 말, 존댓말, 답을 대신 써 주지 않는다.`;
 const IMAGE_PROMPT_PREFIX = `A friendly children's picture-book illustration (soft watercolor, pastel colors, clean white background, no text, no letters, no logos, no real people) of an invention designed by a 9-year-old child. Draw exactly what the child describes, keeping the part that imitates the organism clearly visible and cute. Child's description (Korean): `;
 
@@ -270,7 +271,7 @@ function gemini_(systemText, userText, schema) {
     system_instruction: { parts: [{ text: systemText }] },
     contents: [{ role: 'user', parts: [{ text: userText }] }],
     // gemini-2.5-flash는 기본으로 '생각(thinking)'에 출력 토큰을 먼저 써서 짧은 한도에서 답이 잘림 → 생각 끄기 + 한도 넉넉히
-    generationConfig: { temperature: 0.7, maxOutputTokens: 1024, thinkingConfig: { thinkingBudget: 0 } },
+    generationConfig: { temperature: 0.6, maxOutputTokens: 1024, thinkingConfig: { thinkingBudget: 0 } },
     safetySettings: ['HARM_CATEGORY_HARASSMENT', 'HARM_CATEGORY_HATE_SPEECH', 'HARM_CATEGORY_SEXUALLY_EXPLICIT', 'HARM_CATEGORY_DANGEROUS_CONTENT'].map(function (c) { return { category: c, threshold: 'BLOCK_LOW_AND_ABOVE' }; }),
   };
   if (schema) { body.generationConfig.responseMimeType = 'application/json'; body.generationConfig.responseSchema = schema; }
@@ -489,6 +490,12 @@ const CONNECT_DEFAULT = [
   ['연잎', '잎 표면', '물방울이 굴러 떨어지며 먼지까지 씻어 내요.'], ['도마뱀붙이(게코)', '발바닥', '아주 작은 털로 벽에 착 붙어요.'], ['꿀벌', '벌집', '육각형 벌집은 적은 재료로 튼튼하고 가벼워요.'],
   ['올빼미', '날개 깃털 가장자리', '톱니 깃털로 소리 없이 날아요.'], ['북극곰', '털과 피부', '털 속 공기와 지방이 몸의 열을 지켜요.'], ['문어', '빨판', '빨판으로 어떤 물건도 꽉 잡아요.'],
   ['반딧불이', '배의 발광 부분', '적은 에너지로 밝게 빛나요.'], ['딱따구리', '머리와 부리', '충격을 흡수해 수천 번 쪼아도 안전해요.'], ['상어', '피부(비늘)', '피부 돌기로 물의 방해를 줄여 빠르게 헤엄쳐요.']];
+function cardFor_(org, problem) {   // 문제 유형에 맞는 쉬운 비밀 문장 → 없으면 카드 원문
+  const ranked = scoreConnect_(problem); const rules = ranked.map(function (x) { return x.rule; }).concat(CONNECT_RULES);
+  for (var i = 0; i < rules.length; i++) for (var j = 0; j < rules[i].pool.length; j++) if (rules[i].pool[j][0] === org) return { feature: rules[i].pool[j][1], principle: rules[i].pool[j][2] };
+  const r = ORGANISMS.filter(function (x) { return x[0] === org; })[0] || [];
+  return { feature: r[3] || '', principle: r[4] || '' };
+}
 function hashStr_(s) { s = String(s || ''); let h = 0; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 100003; return h; }
 function scoreConnect_(problem) {
   const raw = String(problem || ''); const flat = raw.replace(/\s+/g, '');
@@ -531,11 +538,19 @@ function connectProblem(p) {
   let out = null, model = 'rule'; const t0 = Date.now();
   if (hasKey_()) {
     try {
-      const list = getOrganisms().map(function (o) { return o.name + '(' + o.look + ')'; }).join(', ');
-      const schema = { type: 'OBJECT', properties: { candidates: { type: 'ARRAY', items: { type: 'OBJECT', properties: { organism: { type: 'STRING' }, feature: { type: 'STRING' }, principle: { type: 'STRING' }, why_fit: { type: 'STRING' } }, required: ['organism', 'feature', 'principle', 'why_fit'] } }, redirect: { type: 'STRING' } }, required: ['candidates'] };
+      const names = ORGANISMS.map(function (r) { return r[0]; });
+      const list = ORGANISMS.map(function (r) { return '- ' + r[0] + ' [' + r[3] + ']: ' + r[4]; }).join('\n');
+      const schema = { type: 'OBJECT', properties: { candidates: { type: 'ARRAY', items: { type: 'OBJECT', properties: { organism: { type: 'STRING', enum: names }, why_fit: { type: 'STRING' } }, required: ['organism', 'why_fit'] } }, redirect: { type: 'STRING' } }, required: ['candidates'] };
       const more = parseInt(p.more, 10) || 0;
       out = parseJson_(gemini_(SYS_CONNECT.replace('{{LIST}}', list), '불편한 문제: ' + problem + (more ? '\n(' + (more + 1) + '번째 요청이에요. 앞에서와 다른 생물로 추천해 줘.)' : ''), schema), null); model = textModel_();
-      if (out && out.candidates) out.candidates = out.candidates.slice(0, 3);
+      if (out && out.candidates) {
+        // 생물 이름은 카드 30개로 제한, 비밀(principle) 문장은 검증된 카드 문장으로 고정, AI는 '어울리는 까닭 질문'만 맡음
+        const fill = ruleConnect_(problem, sid, p.more).candidates; const seen = {};
+        out.candidates = out.candidates.filter(function (c) { if (names.indexOf(c.organism) < 0 || seen[c.organism]) return false; seen[c.organism] = 1; return true; })
+          .slice(0, 3).map(function (c) { const ref = cardFor_(c.organism, problem); return { organism: c.organism, feature: ref.feature, principle: ref.principle, why_fit: c.why_fit }; });
+        fill.forEach(function (c) { if (out.candidates.length < 3 && !seen[c.organism]) { seen[c.organism] = 1; out.candidates.push(c); } });
+        if (out.redirect && out.candidates.length && !(out.candidates[0].why_fit)) out.candidates = [];
+      }
     } catch (e) { out = null; model = 'rule(fallback: ' + String(e.message).slice(0, 40) + ')'; }
   }
   if (!out || !out.candidates || !out.candidates.length) out = ruleConnect_(problem, sid, p.more);
