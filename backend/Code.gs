@@ -543,17 +543,17 @@ function connectProblem(p) {
       const schema = { type: 'OBJECT', properties: { candidates: { type: 'ARRAY', items: { type: 'OBJECT', properties: { organism: { type: 'STRING', enum: names }, why_fit: { type: 'STRING' } }, required: ['organism', 'why_fit'] } }, redirect: { type: 'STRING' } }, required: ['candidates'] };
       const more = parseInt(p.more, 10) || 0;
       out = parseJson_(gemini_(SYS_CONNECT.replace('{{LIST}}', list), '불편한 문제: ' + problem + (more ? '\n(' + (more + 1) + '번째 요청이에요. 앞에서와 다른 생물로 추천해 줘.)' : ''), schema), null); model = textModel_();
-      if (out && out.candidates) {
+      if (out && out.candidates && out.candidates.length) {
         // 생물 이름은 카드 30개로 제한, 비밀(principle) 문장은 검증된 카드 문장으로 고정, AI는 '어울리는 까닭 질문'만 맡음
         const fill = ruleConnect_(problem, sid, p.more).candidates; const seen = {};
         out.candidates = out.candidates.filter(function (c) { if (names.indexOf(c.organism) < 0 || seen[c.organism]) return false; seen[c.organism] = 1; return true; })
           .slice(0, 3).map(function (c) { const ref = cardFor_(c.organism, problem); return { organism: c.organism, feature: ref.feature, principle: ref.principle, why_fit: c.why_fit }; });
         fill.forEach(function (c) { if (out.candidates.length < 3 && !seen[c.organism]) { seen[c.organism] = 1; out.candidates.push(c); } });
-        if (out.redirect && out.candidates.length && !(out.candidates[0].why_fit)) out.candidates = [];
       }
     } catch (e) { out = null; model = 'rule(fallback: ' + String(e.message).slice(0, 40) + ')'; }
   }
-  if (!out || !out.candidates || !out.candidates.length) out = ruleConnect_(problem, sid, p.more);
+  if (!out || (!out.redirect && !(out.candidates || []).length)) out = ruleConnect_(problem, sid, p.more);
+  else if (out.redirect && !(out.candidates || []).length) out = { candidates: [], redirect: out.redirect };
   log_(sid, p.class, p.seat, 'connect', (parseInt(p.more, 10) || 0) + 1, { problem: problem }, out, model, Date.now() - t0);
   return out;
 }
