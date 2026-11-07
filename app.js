@@ -581,7 +581,7 @@
   };
 
   // ───────── 선생님 메뉴 ─────────
-  $('teacherBtn').onclick = () => { $('teacherModal').hidden = false; $('teacherBody').innerHTML = `<p class="muted">선생님 비밀번호를 입력하세요.</p><div class="row"><input type="text" id="pin" placeholder="PIN" style="max-width:160px" inputmode="numeric"><button class="btn" id="pinGo">열기</button></div>`; $('pinGo').onclick = () => teacherLoad($('pin').value); $('pin').onkeydown = (e) => { if (e.key === 'Enter') teacherLoad($('pin').value); }; };
+  $('teacherBtn').onclick = () => { $('teacherModal').hidden = false; $('teacherBody').innerHTML = `<p class="muted">선생님 비밀번호를 입력하세요.</p><div class="row"><input type="password" id="pin" placeholder="••••" style="max-width:160px;letter-spacing:.2em" inputmode="numeric" autocomplete="one-time-code" autocorrect="off" autocapitalize="off" spellcheck="false"><button class="btn" id="pinGo">열기</button></div>`; $('pin').focus(); $('pinGo').onclick = () => teacherLoad($('pin').value); $('pin').onkeydown = (e) => { if (e.key === 'Enter') teacherLoad($('pin').value); }; };
   $('teacherClose').onclick = () => ($('teacherModal').hidden = true);
   async function teacherLoad(pin) {
     $('teacherBody').innerHTML = '<div class="thinking">불러오는 중…</div>';
