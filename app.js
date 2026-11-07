@@ -79,14 +79,14 @@
   ];
 
   const VIEWS = [
-    { id: 'pre', n: '0', ico: '📝', t: '사전 검사', sub: '내 마음 알아보기', key: 'pre_done' },
+    { id: 'pre', n: '0', ico: '💗', t: '내 마음 알아보기', sub: '시작하기 전 내 생각', key: 'pre_done' },
     { id: 'quiz', n: '1', ico: '🔍', t: '만나기', sub: '이 발명품의 선생님은?', key: 'quiz_done' },
     { id: 'observe', n: '2', ico: '🌿', t: '비밀 찾기', sub: '관찰 + AI 멘토', key: 'secret' },
     { id: 'connect', n: '3', ico: '🔗', t: '연결하기', sub: '불편한 문제 ↔ 생물', key: 'chosen' },
     { id: 'create', n: '4', ico: '💡', t: '발명하기', sub: '설명문 → AI 그림', key: 'invention_name' },
     { id: 'protect', n: '5', ico: '💚', t: '지킴이', sub: '자연 선생님을 지켜요', key: 'protect_done' },
     { id: 'share', n: '6', ico: '🏆', t: '박람회', sub: '발표하고 칭찬하기', key: 'reflect_done' },
-    { id: 'post', n: '7', ico: '📝', t: '사후 검사', sub: '달라진 내 마음', key: 'post_done' },
+    { id: 'post', n: '7', ico: '🌱', t: '달라진 내 마음', sub: '얼마나 자랐을까?', key: 'post_done' },
   ];
 
   // ───────── 상태 ─────────
@@ -220,7 +220,7 @@
           <p class="ka-desc">보고, 묻고, 연결하고, 발명하라!<br>동물·식물의 <b>비밀</b>을 찾아 우리 생활을 바꾸는 <b>6번의 모험</b></p>
           <div class="ka-cta">
             <button class="btn start" data-go="${S.me ? next.id : 'login'}">${S.me ? `${next.ico} ${next.n}. ${next.t} 시작 ▶` : '🔒 모험 시작 ▶'}</button>
-            <div class="ka-row"><button class="btn glass sm" data-go="pre">📝 사전 검사</button><button class="btn glass sm" id="howBtn">❓ 놀이 방법</button><button class="btn glass sm" data-go="share">🏆 발명 박람회</button><button class="btn glass sm" id="homeTeacher">🔑 선생님</button></div>
+            <div class="ka-row"><button class="btn glass sm" data-go="pre">💗 내 마음 알아보기</button><button class="btn glass sm" id="howBtn">❓ 놀이 방법</button><button class="btn glass sm" data-go="share">🏆 발명 박람회</button><button class="btn glass sm" id="homeTeacher">🔑 선생님</button></div>
           </div>
         </div>
       </section>
@@ -238,8 +238,8 @@
     const done = phase === 'pre' ? S.progress.pre_done : S.progress.post_done;
     const key = 'survey_' + phase + '_' + (S.me ? S.me.student_id : '');
     const ans = store.get(key, {});
-    if (done) { el.innerHTML = `<div class="card accent"><h2>${phase === 'pre' ? '📝 사전 검사' : '📝 사후 검사'} 완료!</h2><p>이미 제출했어요. 고마워요 🌿</p><div class="actions"><button class="btn" data-go="${phase === 'pre' ? 'quiz' : 'home'}">${phase === 'pre' ? '1. 만나기로 가기 →' : '처음으로'}</button></div></div>`; return; }
-    let html = `<div class="card accent"><h2>${phase === 'pre' ? '📝 사전 검사 · 내 마음 알아보기' : '📝 사후 검사 · 달라진 내 마음'}</h2>
+    if (done) { el.innerHTML = `<div class="card accent"><h2>${phase === 'pre' ? '💗 내 마음 알아보기' : '🌱 달라진 내 마음'} 끝!</h2><p>이미 제출했어요. 고마워요 🌿</p><div class="actions"><button class="btn" data-go="${phase === 'pre' ? 'quiz' : 'home'}">${phase === 'pre' ? '1. 만나기로 가기 →' : '처음으로'}</button></div></div>`; return; }
+    let html = `<div class="card accent"><h2>${phase === 'pre' ? '💗 내 마음 알아보기' : '🌱 달라진 내 마음'}</h2>
       <p>이건 <b>시험이 아니에요.</b> 정답이 없으니 내 마음과 가장 가까운 것을 골라요. 선생님이 한 문항씩 읽어 줄 거예요.</p>
       <div class="row"><label>성별 <select id="svGender"><option value="">선택</option><option value="1">남</option><option value="2">여</option></select></label><span class="tiny">총 ${ITEMS.length}문항${phase === 'post' ? ' + 생각 쓰기 3개' : ''}</span></div></div>`;
     let n = 0;
@@ -589,7 +589,7 @@
       const r = await api('teacher', { pin, op: 'summary', _soft: true }); if (r.error) { $('teacherBody').innerHTML = `<div class="banner">${esc(r.error)}</div>`; return; }
       $('teacherBody').innerHTML = `
         ${r.local ? '<div class="banner">연습 모드: config.js의 API_URL이 비어 있어 데이터가 이 브라우저에만 저장돼요. 백엔드를 배포한 뒤 URL을 넣으면 스프레드시트에 저장됩니다.</div>' : `<div class="banner ok">서버 연결됨 · 멘토: ${esc(r.mentor_mode)} · <a href="${esc(r.sheet_url)}" target="_blank">데이터 스프레드시트 열기 ↗</a></div>`}
-        <div class="kpi"><div><b>${r.students}</b><small>접속 학생</small></div><div><b>${r.pre}</b><small>사전 검사</small></div><div><b>${r.post}</b><small>사후 검사</small></div><div><b>${r.quiz}</b><small>퀴즈</small></div><div><b>${r.secrets}</b><small>비밀 저장</small></div><div><b>${r.connects}</b><small>연결</small></div><div><b>${r.inventions}</b><small>발명 설계도</small></div><div><b>${r.comments ?? 0}</b><small>칭찬 댓글</small></div><div><b>${r.protects}</b><small>지킴이</small></div><div><b>${r.reflects}</b><small>소감</small></div></div>
+        <div class="kpi"><div><b>${r.students}</b><small>접속 학생</small></div><div><b>${r.pre}</b><small>내 마음(사전)</small></div><div><b>${r.post}</b><small>달라진 마음(사후)</small></div><div><b>${r.quiz}</b><small>퀴즈</small></div><div><b>${r.secrets}</b><small>비밀 저장</small></div><div><b>${r.connects}</b><small>연결</small></div><div><b>${r.inventions}</b><small>발명 설계도</small></div><div><b>${r.comments ?? 0}</b><small>칭찬 댓글</small></div><div><b>${r.protects}</b><small>지킴이</small></div><div><b>${r.reflects}</b><small>소감</small></div></div>
         <h3 style="margin-top:16px">설정</h3>
         <div class="switch"><label><input type="checkbox" id="tMentor" ${r.mentor_on ? 'checked' : ''}> AI 멘토 켜기 (끄면 "쉬는 시간" 안내)</label></div>
         <div class="switch"><label><input type="checkbox" id="tImage" ${r.image_on ? 'checked' : ''}> AI 그림 생성 켜기 (API 키 있을 때만 동작)</label></div>
