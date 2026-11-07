@@ -588,7 +588,7 @@
     try {
       const r = await api('teacher', { pin, op: 'summary', _soft: true }); if (r.error) { $('teacherBody').innerHTML = `<div class="banner">${esc(r.error)}</div>`; return; }
       $('teacherBody').innerHTML = `
-        ${r.local ? '<div class="banner">연습 모드: config.js의 API_URL이 비어 있어 데이터가 이 브라우저에만 저장돼요. 백엔드를 배포한 뒤 URL을 넣으면 스프레드시트에 저장됩니다.</div>' : `<div class="banner ok">서버 연결됨 · 멘토: ${esc(r.mentor_mode)} · <a href="${esc(r.sheet_url)}" target="_blank">데이터 스프레드시트 열기 ↗</a></div>`}
+        ${r.local ? '<div class="banner">연습 모드: config.js의 API_URL이 비어 있어 데이터가 이 브라우저에만 저장돼요. 백엔드를 배포한 뒤 URL을 넣으면 스프레드시트에 저장됩니다.</div>' : `<div class="banner ok">서버 연결됨 · 멘토: ${r.mentor_mode === 'gemini' ? 'AI(제미나이)' : '규칙'}</div><button class="btn violet big-insight" id="tInsight">🔍 세심하게 살펴보기<small>아이들이 쓴 글 · 반응 · 교사 시사점을 한눈에</small></button>`}
         <div class="kpi"><div><b>${r.students}</b><small>접속 학생</small></div><div><b>${r.pre}</b><small>내 마음(사전)</small></div><div><b>${r.post}</b><small>달라진 마음(사후)</small></div><div><b>${r.quiz}</b><small>퀴즈</small></div><div><b>${r.secrets}</b><small>비밀 저장</small></div><div><b>${r.connects}</b><small>연결</small></div><div><b>${r.inventions}</b><small>발명 설계도</small></div><div><b>${r.comments ?? 0}</b><small>칭찬 댓글</small></div><div><b>${r.protects}</b><small>지킴이</small></div><div><b>${r.reflects}</b><small>소감</small></div></div>
         <h3 style="margin-top:16px">설정</h3>
         <div class="switch"><label><input type="checkbox" id="tMentor" ${r.mentor_on ? 'checked' : ''}> AI 멘토 켜기 (끄면 "쉬는 시간" 안내)</label></div>
@@ -601,8 +601,138 @@
       $('tPhase').onchange = async (e) => { try { await api('teacher', { pin, op: 'phase', value: e.target.value }); toast('검사 단계를 바꿨어요'); } catch (err) { toast(err.message); } };
       $('tExport').onclick = async () => { $('tExport').disabled = true; try { const x = await api('teacher', { pin, op: 'export' }); toast('내보내기 완료!'); if (x.url) window.open(x.url, '_blank'); } catch (e) { toast(e.message); } $('tExport').disabled = false; };
       $('tRefresh').onclick = () => teacherLoad(pin);
+      T.pin = pin; if ($('tInsight')) $('tInsight').onclick = openInsights;
       if (window.QRCode) new QRCode($('qr'), { text: CFG.QR_URL || location.href.split('#')[0], width: 180, height: 180 });
     } catch (e) { $('teacherBody').innerHTML = `<div class="banner">${esc(e.message)}</div>`; }
+  }
+
+  // ───────── 선생님: 세심하게 살펴보기(수업 리포트) ─────────
+  const T = { pin: null, cls: 0, data: null };
+  const STAGE_SHORT = ['마음', '만나기', '비밀', '연결', '발명', '지킴이', '박람회', '소감', '달라짐'];
+  const TIP_ICO = { good: '✅', watch: '👀', todo: '🛠', info: 'ℹ️' };
+  const iBars = (rows) => {
+    if (!rows || !rows.length) return '<p class="muted">아직 자료가 없어요.</p>';
+    const max = Math.max(1, ...rows.map((x) => x.n || 0));
+    return `<div class="ibars">${rows.map((r) => { const w = r.pct != null ? r.pct : (r.n / max) * 100; return `<div class="ibar"><span class="ib-l" title="${esc(r.k)}">${esc(r.k)}</span><span class="ib-t"><i style="width:${Math.max(2, Math.min(100, w))}%"></i></span><b>${esc(r.v != null ? r.v : r.n)}</b></div>`; }).join('')}</div>`;
+  };
+  const iQuotes = (items, empty = '아직 글이 없어요.') => (items && items.length) ? `<div class="iquotes">${items.map((q) => `<figure class="iq"><blockquote>${esc(q.t)}</blockquote><figcaption>${esc(q.sid)}${q.tag ? ' · ' + esc(q.tag) : ''}</figcaption></figure>`).join('')}</div>` : `<p class="muted">${empty}</p>`;
+  const iStat = (v, l) => `<div class="istat"><b>${esc(v)}</b><small>${esc(l)}</small></div>`;
+  const iSec = (ico, title, sub, body, id = '') => `<section class="card isec" ${id ? `id="${id}"` : ''}><h3 class="ih">${ico} ${title}${sub ? `<small>${esc(sub)}</small>` : ''}</h3>${body}</section>`;
+  const iFlags = (groups) => { const g = groups.filter((x) => x[1] && x[1].length); return g.length ? g.map((x) => `<details class="iflag"><summary>${esc(x[0])} <b>${x[1].length}</b></summary>${iQuotes(x[1])}</details>`).join('') : '<p class="muted">따로 살펴볼 글이 없어요 👍</p>'; };
+
+  function openInsights() {
+    $('teacherModal').hidden = true; const lm = $('loginModal'); if (lm) lm.hidden = true;
+    S.view = 'insights'; renderNav(); closeSide(); $('viewName').textContent = '🔍 세심하게 살펴보기';
+    const classes = [0].concat(CFG.CLASSES || [1, 2, 3, 4]);
+    $('content').innerHTML = `<div class="view wide ins" id="v">
+      <div class="card ins-head"><div class="ins-title"><h2>🔍 세심하게 살펴보기</h2><p class="muted">아이들이 쓴 글과 반응, 다음 수업을 위한 시사점을 한눈에 모았어요. 학생은 반-번호로만 보여요.</p></div>
+        <div class="ins-tools"><div class="ichips" id="insCls">${classes.map((c) => `<button class="pchip ${T.cls === c ? 'on' : ''}" data-c="${c}">${c ? c + '반' : '전체'}</button>`).join('')}</div>
+        <div class="actions"><button class="btn ghost sm" id="insRefresh">🔄 새로고침</button><button class="btn ghost sm" id="insPrint">🖨 인쇄·PDF</button><button class="btn ghost sm" id="insBack">← 선생님 메뉴</button></div></div></div>
+      <div id="insBody"></div></div>`;
+    window.scrollTo(0, 0); $('content').scrollTop = 0;
+    $('insCls').onclick = (e) => { const b = e.target.closest('[data-c]'); if (!b) return; T.cls = parseInt(b.dataset.c, 10); $('insCls').querySelectorAll('.pchip').forEach((x) => x.classList.toggle('on', x === b)); loadInsights(); };
+    $('insRefresh').onclick = loadInsights; $('insPrint').onclick = () => window.print();
+    $('insBack').onclick = () => { $('teacherModal').hidden = false; teacherLoad(T.pin); };
+    loadInsights();
+  }
+  async function loadInsights() {
+    const body = $('insBody'); if (!body) return; const cls = T.cls;
+    body.innerHTML = '<div class="card"><div class="thinking">아이들 글을 모아 정리하는 중… (전체 반은 10초쯤 걸려요)</div></div>';
+    try {
+      const d = await api('teacher', { pin: T.pin, op: 'insights', class: cls });
+      if (cls !== T.cls || !$('insBody')) return;
+      T.data = d; body.innerHTML = renderInsights(d); wireInsights(d); loadInsightAI();
+    } catch (e) { body.innerHTML = `<div class="banner">${esc(e.message)}</div>`; }
+  }
+  async function loadInsightAI() {
+    const box = $('insAI'); if (!box) return; const cls = T.cls;
+    try {
+      const r = await api('teacher', { pin: T.pin, op: 'insights_ai', class: cls, _soft: true });
+      if (cls !== T.cls || !$('insAI')) return;
+      if (r.error) { box.innerHTML = `<p class="tiny">🤖 ${esc(r.error)}</p>`; return; }
+      const col = (t, arr, c) => `<div class="iai-col ${c}"><h5>${t}</h5><ul>${(arr || []).map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>`;
+      box.innerHTML = `<div class="iai-head">🤖 AI가 읽은 우리 반 <span class="tiny">아이들 글과 숫자만 근거로 정리한 참고 의견이에요</span></div><p class="iai-sum">${esc(r.summary)}</p>
+        <div class="iai-grid">${col('😊 잘 되고 있어요', r.strengths, 'good')}${col('👀 살펴볼 점', r.concerns, 'watch')}${col('🛠 다음 시간에', r.next_steps, 'todo')}${col('📚 논문에 쓸 관찰', r.research, 'res')}</div>`;
+    } catch (e) { box.innerHTML = `<p class="tiny">🤖 AI 요약을 불러오지 못했어요 (${esc(e.message)})</p>`; }
+  }
+  function renderInsights(d) {
+    if (!d.N) return '<div class="card"><p class="muted">이 반은 아직 참여한 학생이 없어요.</p></div>';
+    const scope = d.scope === 'all' ? '전체 반' : d.scope + '반';
+    const avgProg = Math.round(d.students.reduce((a, s) => a + s.done.reduce((x, y) => x + y, 0), 0) / (d.N * 9) * 100);
+    const sv = d.survey, sc = d.secrets, cn = d.connect, iv = d.invention, ex = d.exhibit, pr = d.protect, rf = d.reflect;
+    let h = '';
+    h += iSec('📊', '한눈에 보기', `${scope} · ${d.N}명 · ${d.updated} 기준`,
+      `<div class="istats">${iStat(d.N + '명', '참여 학생')}${iStat(avgProg + '%', '평균 진행')}${iStat(d.quiz.avg != null ? d.quiz.avg + '점' : '-', '퀴즈 평균(8점)')}${iStat(sc.n + '명', '비밀을 찾은 학생')}${iStat(iv.n + '개', '발명 설계')}${iStat(ex.comments + '개', '칭찬 댓글')}</div>
+       <h4>단계별로 어디까지 왔나요?</h4>${iBars(d.funnel.map((f) => ({ k: f.label, pct: f.pct, v: `${f.n}명 · ${f.pct}%` })))}`);
+    h += iSec('📌', '교사에게 주는 시사점', '데이터가 말해 주는 것',
+      `<ul class="itips">${d.tips.length ? d.tips.map((t) => `<li class="${t.lv}"><span>${TIP_ICO[t.lv] || '•'}</span><p>${esc(t.t)}</p></li>`).join('') : '<li class="info"><span>ℹ️</span><p>아직 데이터가 적어요. 수업이 진행되면 시사점이 생겨요.</p></li>'}</ul>
+       <div id="insAI" class="iai"><div class="thinking">🤖 AI가 아이들 글을 읽고 시사점을 정리하는 중…</div></div>`);
+    const surveyBody = (sv.nPre || sv.nPost) ? `<p class="muted">사전 ${sv.nPre}명 · 사후 ${sv.nPost}명 · 둘 다 응답 ${sv.nPaired}명 (5점 척도${sv.nPaired ? ', 둘 다 응답한 학생 기준' : ''})</p>` + sv.factors.map((f) => {
+      const a = sv.nPaired ? f.pairedPre : f.pre, b = sv.nPaired ? f.pairedPost : f.post; const dl = (a != null && b != null) ? Math.round((b - a) * 100) / 100 : null;
+      return `<div class="ipair"><div class="ip-l">${esc(f.label)}${dl != null ? ` <span class="delta ${dl > 0 ? 'up' : dl < 0 ? 'down' : ''}">${dl > 0 ? '+' : ''}${dl}</span>` : ''}</div><div class="ip-b"><span class="pre" style="width:${(a || 0) / 5 * 100}%"><em>사전 ${a != null ? a : '-'}</em></span><span class="post" style="width:${(b || 0) / 5 * 100}%"><em>사후 ${b != null ? b : '-'}</em></span></div></div>`;
+    }).join('') + (sv.nPost ? '' : '<p class="tiny">‘달라진 내 마음’(사후) 응답이 모이면 변화가 보여요. 10/12 1차시 사전 응답은 구글폼 응답 시트에 따로 있어요.</p>') : '<p class="muted">아직 응답이 없어요.</p>';
+    h += iSec('💗', '마음 변화', '내 마음 알아보기 → 달라진 내 마음', surveyBody);
+    h += iSec('🔍', '1차시 · 만나기 퀴즈', `${d.quiz.n}명 · 평균 ${d.quiz.avg != null ? d.quiz.avg : '-'}점 · 만점 ${d.quiz.full}명`,
+      `<h4>문항별 정답률</h4>${iBars(d.quiz.items.map((p, i) => ({ k: `${i + 1}. ${QUIZ[i] ? QUIZ[i].inv : ''}`, pct: p, v: p + '%' })))}
+       <h4>“자연은 ○○ 선생님이다” — 아이들의 첫 생각</h4>${iQuotes(d.quiz.sentences.slice(0, 12))}`);
+    h += iSec('🌿', '2차시 · 비밀 찾기', `${sc.n}명`,
+      `<div class="istats">${iStat(sc.whyPct + '%', '까닭까지 쓴 학생')}${iStat(sc.onTargetPct + '%', '생체모방 핵심을 짚음')}${iStat((sc.mentorAvg || 0) + '회', '멘토에게 물은 평균')}${iStat(sc.searchPct + '%', '검색해 본 학생')}${iStat(sc.aiPct + '%', 'AI 멘토 응답 비율')}</div>
+       <div class="igrid2"><div><h4>어떤 생물을 골랐나요?</h4>${iBars(sc.orgs)}</div><div><h4>🌟 잘 찾은 비밀</h4>${iQuotes(sc.highlights.map((x) => ({ sid: x.sid, tag: x.org, t: x.text + (x.why ? ' — 까닭: ' + x.why : '') })), '조건(핵심 + 까닭 + 내 말)을 다 갖춘 글이 아직 없어요.')}</div></div>
+       <h4>👀 살펴볼 글</h4>${iFlags([['생체모방과 거리가 먼 비밀', sc.offTarget.map((x) => ({ sid: x.sid, tag: x.org, t: x.text }))], ['인터넷 글을 옮긴 듯한 글', sc.copied.map((x) => ({ sid: x.sid, tag: x.org, t: x.text || x.what }))], ['장난 입력', sc.noise.map((x) => ({ sid: x.sid, tag: x.org, t: '(자모가 섞인 글)' }))]])}`);
+    h += iSec('🔗', '3차시 · 연결하기', `${cn.n}명`,
+      `<div class="istats">${iStat(cn.n + '명', '연결한 학생')}${iStat(cn.causalPct + '%', '“~하니까” 까닭을 넣음')}</div>
+       <div class="igrid2"><div><h4>아이들이 꼽은 생활 속 불편</h4>${iBars(cn.types)}</div><div><h4>가장 많이 고른 생물</h4>${iBars(cn.chosen)}</div></div>
+       <h4>💬 “왜 이 생물?” — 까닭을 잘 쓴 글</h4>${iQuotes(cn.reasons.map((x) => ({ sid: x.sid, tag: x.problem + ' → ' + x.chosen, t: x.reason })))}`);
+    h += iSec('💡', '4차시 · 발명하기', `${iv.n}개`,
+      `<div class="istats">${iStat(iv.n + '개', '발명 설계')}${iStat(iv.imgUsers + '명', 'AI 그림 사용')}${iStat(iv.imgTotal + '장', '그린 AI 그림')}${iStat(iv.diffPct + '%', 'AI 그림과 비교해 씀')}</div>
+       <h4>설명문 3문장 틀, 얼마나 갖췄나요?</h4>${iBars(Object.keys(iv.ckPct).map((k) => ({ k, pct: iv.ckPct[k], v: iv.ckPct[k] + '%' })))}
+       <h4>🎨 AI 그림 vs 내 스케치 — 아이들이 찾은 차이</h4>${iQuotes(iv.diffs.map((x) => ({ sid: x.sid, tag: x.name, t: x.t })), 'AI 그림과 비교한 글이 아직 없어요.')}
+       <h4>👀 살펴볼 발명</h4>${iFlags([['고른 생물과 설명 속 생물이 다름', iv.mismatch.map((x) => ({ sid: x.sid, tag: x.name, t: '고른 생물: ' + x.org }))], ['인터넷 글 복사', iv.copied.map((x) => ({ sid: x.sid, t: x.name }))], ['장난 입력', iv.noise.map((x) => ({ sid: x.sid, t: '(자모가 섞인 글)' }))]])}
+       <h4>💡 아이들의 발명품</h4><div class="iinv">${iv.items.filter((x) => !x.noise).map((x) => `<article class="iv"><div class="iv-img" data-file="${esc(x.file)}">${x.file ? '<button class="btn ghost sm iv-load">🖼 AI 그림 보기</button>' : '<span class="tiny">AI 그림 없음 (스케치만)</span>'}</div>
+         <div class="iv-b"><b>${esc(x.name)}</b> <span class="tiny">${esc(x.sid)} · ${esc(x.org)}</span><p>${esc(x.desc)}</p><div class="iv-ck">${Object.keys(x.ck).map((k) => `<span class="ck ${x.ck[k] ? 'ok' : ''}">${x.ck[k] ? '✅' : '⬜'} ${esc(k)}</span>`).join('')}</div>
+         <div class="tiny">👍 ${x.recv.like} · ❓ ${x.recv.curious} · 💬 ${x.recv.comments}${x.imgs ? ` · 🎨 ${x.imgs}장` : ''}${x.fbN ? ` · 멘토 피드백 ${x.fbN}번` : ''}</div></div></article>`).join('')}</div>`);
+    h += iSec('🏆', '5~6차시 · 박람회', `반응 ${ex.likes + ex.curious + ex.comments}개`,
+      `<div class="istats">${iStat(ex.likes, '👍 좋아요')}${iStat(ex.curious, '❓ 궁금해요')}${iStat(ex.comments, '💬 칭찬 댓글')}${iStat(ex.givers + '명', '친구를 칭찬한 학생')}</div>
+       <div class="igrid2"><div><h4>🏆 반응이 많았던 작품</h4>${ex.top.length ? `<ol class="itop">${ex.top.map((x) => `<li><b>${esc(x.name)}</b> <span class="tiny">${esc(x.sid)} · ${esc(x.org)} · 👍${x.like} ❓${x.curious} 💬${x.comments}</span>${x.cms.length ? `<div class="tiny">“${x.cms.map(esc).join('” “')}”</div>` : ''}</li>`).join('')}</ol>` : '<p class="muted">아직 반응이 없어요.</p>'}</div>
+       <div><h4>아이들이 많이 쓴 칭찬</h4>${iBars(ex.praise)}</div></div>${ex.noReceive.length ? `<p class="iwarn">🛠 아직 반응을 하나도 못 받은 작품: ${ex.noReceive.map(esc).join(', ')}</p>` : ''}`);
+    h += iSec('🦦', '자연 지킴이', `${pr.n}명`,
+      `<div class="igrid2"><div><h4>지키고 싶은 생물</h4>${iBars(pr.species)}</div><div><h4>지킴이 약속</h4>${iBars(pr.promises)}</div></div>
+       <h4>💌 자연 선생님께 쓴 편지</h4>${iQuotes(pr.letters.map((x) => ({ sid: x.sid, tag: x.species, t: x.t })))}${pr.lost.length ? `<h4>그 생물이 사라지면 잃게 될 발명</h4>${iQuotes(pr.lost.map((x) => ({ sid: x.sid, tag: x.species, t: x.t })))}` : ''}`);
+    h += iSec('🌱', '소감과 달라진 생각', `${rf.n}명`,
+      `${rf.pairs.length ? `<h4>“자연은 나에게 ○○” — 1차시 → 6차시</h4><div class="ipairs">${rf.pairs.map((x) => `<div class="ipr"><span class="tiny">${esc(x.sid)}</span><p>${esc(x.before)}</p><span class="arr">→</span><p class="a">${esc(x.after)}</p></div>`).join('')}</div>` : ''}
+       <h4>자연은 나에게…</h4>${iQuotes(rf.nature.slice(0, 16))}<h4>오늘의 소감</h4>${iQuotes(rf.texts)}
+       ${d.openAns.some((o) => o.items.length) ? d.openAns.map((o) => `<h4>📝 ${esc(o.q)}</h4>${iQuotes(o.items.slice(0, 10))}`).join('') : ''}`);
+    h += iSec('👥', '학생별 살펴보기', '줄을 누르면 그 학생이 쓴 글이 모두 펼쳐져요',
+      `<div class="itable-wrap"><table class="itable"><thead><tr><th>번호</th>${STAGE_SHORT.map((s) => `<th>${s}</th>`).join('')}<th>퀴즈</th><th>멘토</th><th>살펴볼 점</th></tr></thead><tbody>
+       ${d.students.map((s, i) => `<tr class="srow" data-i="${i}"><td><b>${esc(s.sid)}</b></td>${s.done.map((x) => `<td class="dot ${x ? 'on' : ''}">${x ? '●' : '○'}</td>`).join('')}<td>${s.quiz != null ? s.quiz : '-'}</td><td>${s.mentor || '-'}</td><td>${s.flags.map((f) => `<span class="iflagc">${esc(f)}</span>`).join(' ')}</td></tr><tr class="sdet" hidden><td colspan="${STAGE_SHORT.length + 4}"></td></tr>`).join('')}
+       </tbody></table></div>`);
+    h += `<div class="card ifoot"><span class="tiny">원본이 필요할 때만 열어 보세요.</span><span><a href="${esc(d.sheet_url)}" target="_blank" rel="noopener">📄 원본 데이터 시트 ↗</a></span></div>`;
+    return h;
+  }
+  function studentDetail(s) {
+    const d = s.detail; const row = (l, t) => t ? `<div class="sd-r"><span>${esc(l)}</span><p>${esc(t)}</p></div>` : '';
+    return `<div class="sd">${row('자연은 ○○ 선생님(1차시)', d.quizSentence)}
+      ${d.secret ? row('🌿 비밀 찾기 · ' + d.secret.org, `모습: ${d.secret.what} / 하는 일: ${d.secret.how} / 까닭: ${d.secret.why} → 비밀: ${d.secret.text}`) : ''}
+      ${d.connect ? row('🔗 연결하기', `${d.connect.problem} → ${d.connect.chosen} · ${d.connect.reason}`) : ''}
+      ${d.inv ? row('💡 발명 · ' + d.inv.name + ' (' + d.inv.org + ')', d.inv.desc + (d.inv.diff ? ` ｜ AI 그림과 비교: ${d.inv.diff}` : '')) : ''}
+      ${d.inv && d.inv.cms.length ? row('💬 받은 칭찬', d.inv.cms.join(' / ')) : ''}
+      ${d.protect ? row('🦦 지킴이 · ' + d.protect.species, d.protect.promise + (d.protect.letter ? ' ｜ ' + d.protect.letter : '')) : ''}
+      ${d.reflect ? row('🌱 소감', [d.reflect.s, d.reflect.text, d.reflect.nature].filter((x) => String(x || '').trim()).join(' ｜ ')) : ''}
+      ${d.open ? d.open.map((t, i) => row('📝 사후 서술 ' + (i + 1), t)).join('') : ''}
+      ${(s.pre != null || s.post != null) ? row('💗 자연과 이어진 마음', `사전 ${s.pre != null ? s.pre : '-'} → 사후 ${s.post != null ? s.post : '-'}`) : ''}</div>`;
+  }
+  function wireInsights(d) {
+    const body = $('insBody');
+    body.querySelectorAll('.srow').forEach((tr) => tr.onclick = () => {
+      const det = tr.nextElementSibling; if (!det) return;
+      if (det.hidden) { det.firstElementChild.innerHTML = studentDetail(d.students[parseInt(tr.dataset.i, 10)]); det.hidden = false; tr.classList.add('open'); }
+      else { det.hidden = true; tr.classList.remove('open'); }
+    });
+    body.querySelectorAll('.iv-load').forEach((b) => b.onclick = async () => {
+      const box = b.closest('.iv-img'); b.disabled = true; b.textContent = '불러오는 중…';
+      try { const r = await api('image', { file_id: box.dataset.file }); box.innerHTML = r.data_url ? `<img src="${r.data_url}" alt="AI 그림">` : '<span class="tiny">그림을 찾지 못했어요</span>'; }
+      catch (e) { b.disabled = false; b.textContent = '다시 시도'; }
+    });
   }
 
   // ───────── 시작 ─────────

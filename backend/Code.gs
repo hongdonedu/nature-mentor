@@ -270,13 +270,13 @@ function isBlocked_(t) { t = String(t || '').replace(/아이디어/g, ''); retur
 const REDIRECT = { praise: '궁금한 게 많군요!', q1: '지금은 생물의 비밀을 찾아볼까요?', q2: '고른 생물의 어디가 특별해 보이나요?', hint: '사진에서 가장 눈에 띄는 부분을 다시 봐요.' };
 
 // ───────────── Gemini ─────────────
-function gemini_(systemText, userText, schema) {
+function gemini_(systemText, userText, schema, maxTokens) {
   const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + textModel_() + ':generateContent?key=' + apiKey_();
   const body = {
     system_instruction: { parts: [{ text: systemText }] },
     contents: [{ role: 'user', parts: [{ text: userText }] }],
     // gemini-2.5-flash는 기본으로 '생각(thinking)'에 출력 토큰을 먼저 써서 짧은 한도에서 답이 잘림 → 생각 끄기 + 한도 넉넉히
-    generationConfig: { temperature: 0.6, maxOutputTokens: 1024, thinkingConfig: { thinkingBudget: 0 } },
+    generationConfig: { temperature: 0.6, maxOutputTokens: maxTokens || 1024, thinkingConfig: { thinkingBudget: 0 } },
     safetySettings: ['HARM_CATEGORY_HARASSMENT', 'HARM_CATEGORY_HATE_SPEECH', 'HARM_CATEGORY_SEXUALLY_EXPLICIT', 'HARM_CATEGORY_DANGEROUS_CONTENT'].map(function (c) { return { category: c, threshold: 'BLOCK_LOW_AND_ABOVE' }; }),
   };
   if (schema) { body.generationConfig.responseMimeType = 'application/json'; body.generationConfig.responseSchema = schema; }
@@ -769,6 +769,8 @@ function teacher_(p) {
   if (op === 'toggle') { setSetting_(p.key, p.value ? 'TRUE' : 'FALSE'); return { ok: true }; }
   if (op === 'phase') { setSetting_('survey_phase', p.value === 'post' ? 'post' : 'pre'); return { ok: true, phase: p.value }; }
   if (op === 'export') { exportAll(); return { ok: true, url: ss_().getUrl() }; }
+  if (op === 'insights') return buildInsights_(p.class);
+  if (op === 'insights_ai') return insightsAI_(p.class);
   // summary
   const students = sheet_('학생').getDataRange().getValues().length - 1;
   const surveys = sheet_('설문').getDataRange().getValues(); let pre = 0, post = 0;
@@ -781,6 +783,272 @@ function teacher_(p) {
     stage: stage, mentor_on: setting_('mentor_on'), image_on: setting_('image_on'), survey_phase: settingValue_('survey_phase', 'pre'),
     mentor_mode: hasKey_() ? 'gemini' : 'rule', sheet_url: ss_().getUrl(),
   };
+}
+
+// ───────────── 선생님: 세심하게 살펴보기(수업 리포트) ─────────────
+// 시트 원본을 반별로 모아 '아이들이 쓴 글 · 반응 · 교사 시사점'으로 정리한다. 90번 이상(교사 테스트)은 뺀다.
+const TYPE_LABEL = { slip: '미끄러움', wet: '물에 젖음', stick: '붙이기·고정', noise: '시끄러움', heavy: '무거움·튼튼함', cold: '추위', hot: '더위', dark: '어두움', hurt: '다침·아픔', speed: '빠르기', dirty: '더러움', grab: '잡기·줍기', wind: '바람·공기', water: '물 부족', find: '찾기', energy: '에너지', protect: '지키기', none: '기타' };
+const STAGES_ = [['pre', '내 마음'], ['quiz', '만나기'], ['secret', '비밀 찾기'], ['connect', '연결하기'], ['invent', '발명하기'], ['protect', '지킴이'], ['share', '박람회'], ['reflect', '소감'], ['post', '달라진 마음']];
+const FACTOR_LABEL = { CNI: '자연과 이어진 마음', CSE: '창의적 자신감', AIP: 'AI를 생각 파트너로' };
+
+function rows_(name) { return sheet_(name).getDataRange().getValues().slice(1); }
+function isTestSid_(sid) { return parseInt(String(sid).split('-')[1], 10) >= 90; }
+function clsOf_(sid) { return parseInt(String(sid).split('-')[0], 10) || 0; }
+function jamoNoise_(t) { t = String(t || ''); const j = (t.match(/[ㄱ-ㅎㅏ-ㅣ]/g) || []).length, s = (t.match(/[가-힣]/g) || []).length; return j >= 4 && j > s * 0.3; }
+function looksCopied_(t) { t = String(t || ''); return t.length > 170 || /[A-Za-z]{6,}/.test(t) || (/습니다/.test(t) && t.length > 90) || /한국경제|나무위키|위키백과|출처|기자|☀|•|\+\d/.test(t); }
+function mean_(a) { a = a.filter(function (x) { return x !== '' && x != null && !isNaN(Number(x)); }).map(Number); return a.length ? Math.round(a.reduce(function (s, x) { return s + x; }, 0) / a.length * 100) / 100 : null; }
+function countTop_(arr, n) { const c = {}; arr.forEach(function (x) { x = String(x || '').trim(); if (x) c[x] = (c[x] || 0) + 1; }); return Object.keys(c).map(function (k) { return { k: k, n: c[k] }; }).sort(function (a, b) { return b.n - a.n; }).slice(0, n || 10); }
+function pct_(a, b) { return b ? Math.round(a / b * 100) : 0; }
+function short_(t, n) { t = String(t || '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n) + '…' : t; }
+function cleanText_(t) { t = String(t || '').trim(); return t && !jamoNoise_(t) ? t : ''; }
+
+function buildInsights_(classNo) {
+  classNo = parseInt(classNo, 10) || 0;
+  const inScope = function (sid) { sid = sidStr_(sid); return !!sid && sid.indexOf('-') > 0 && !isTestSid_(sid) && (!classNo || clsOf_(sid) === classNo); };
+  const S = {};
+  const stu = function (sid) { sid = sidStr_(sid); if (!S[sid]) S[sid] = { sid: sid, cls: clsOf_(sid), seat: parseInt(sid.split('-')[1], 10), done: {}, log: {}, aiN: 0, ruleN: 0, recv: { like: 0, curious: 0, comments: 0 }, cms: [], given: 0, orgs: {} }; return S[sid]; };
+  rows_('학생').forEach(function (r) { if (inScope(r[0])) stu(r[0]); });
+
+  // 설문
+  const sv = sheet_('설문').getDataRange().getValues(); const sh = sv[0]; const ci = function (n) { return sh.indexOf(n); };
+  sv.slice(1).forEach(function (r) {
+    const sid = sidStr_(r[1]); if (!inScope(sid)) return; const s = stu(sid); const ph = r[4] === 'post' ? 'post' : 'pre';
+    s[ph] = { CNI: r[ci('M_CNI')], CSE: r[ci('M_CSE')], AIP: r[ci('M_AIP')], open: [r[ci('open1')], r[ci('open2')], r[ci('open3')]].map(function (x) { return String(x || ''); }) };
+    s.done[ph] = 1;
+  });
+  // 퀴즈
+  rows_('퀴즈').forEach(function (r) {
+    const sid = sidStr_(r[1]); if (!inScope(sid)) return; const s = stu(sid);
+    s.quiz = { score: Number(r[4]) || 0, answers: parseJson_(r[5], []) }; if (String(r[6] || '').trim()) s.quizSentence = String(r[6]); s.done.quiz = 1;
+  });
+  // 비밀
+  rows_('비밀').forEach(function (r) {
+    const sid = sidStr_(r[1]); if (!inScope(sid)) return; const s = stu(sid);
+    s.secret = { org: String(r[2] || ''), what: String(r[3] || ''), how: String(r[4] || ''), why: String(r[5] || ''), text: String(r[6] || '') };
+    s.orgs[String(r[2] || '')] = 1; s.done.secret = 1;
+  });
+  // 연결
+  rows_('연결').forEach(function (r) {
+    const sid = sidStr_(r[1]); if (!inScope(sid)) return; const s = stu(sid);
+    s.connect = { problem: String(r[2] || ''), chosen: String(r[4] || ''), reason: String(r[5] || '') }; s.done.connect = 1;
+  });
+  // 발명
+  const invOwner = {};
+  rows_('발명').forEach(function (r) {
+    const sid = sidStr_(r[2]); invOwner[r[1]] = sid; if (!inScope(sid)) return; const s = stu(sid); const prev = s.inv || {};
+    s.inv = { id: r[1], org: String(r[4] || ''), name: String(r[5] || ''), desc: String(r[6] || ''), diff: String(r[7] || '') || prev.diff || '', file: String(r[8] || '') || prev.file || '' };
+    s.done.invent = 1;
+  });
+  // 반응·댓글
+  rows_('반응').forEach(function (r) {
+    const giver = sidStr_(r[1]); const owner = invOwner[r[2]];
+    if (inScope(giver)) { stu(giver).done.share = 1; stu(giver).given++; }
+    if (owner && inScope(owner)) stu(owner).recv[r[3] === 'like' ? 'like' : 'curious']++;
+  });
+  const allComments = [];
+  rows_('댓글').forEach(function (r) {
+    if (String(r[6]).toUpperCase() === 'TRUE') return;
+    const giver = sidStr_(r[1]), target = sidStr_(r[3]);
+    if (inScope(giver)) { stu(giver).done.share = 1; stu(giver).given++; }
+    if (inScope(target)) { const o = stu(target); o.recv.comments++; o.cms.push(String(r[5])); allComments.push(String(r[5])); }
+  });
+  // 지킴이·소감
+  rows_('지킴이').forEach(function (r) {
+    const sid = sidStr_(r[1]); if (!inScope(sid)) return; const s = stu(sid);
+    s.protect = { species: String(r[3] || ''), lost: String(r[4] || ''), promise: String(r[5] || ''), letter: String(r[6] || '') }; s.done.protect = 1;
+  });
+  rows_('소감').forEach(function (r) {
+    const sid = sidStr_(r[1]); if (!inScope(sid)) return; const s = stu(sid);
+    s.reflect = { s1: String(r[3] || ''), s2: String(r[4] || ''), s3: String(r[5] || ''), text: String(r[6] || ''), nature: String(r[7] || '') }; s.done.reflect = 1;
+  });
+  // 로그(멘토·검색·그림·AI/규칙)
+  rows_('로그').forEach(function (r) {
+    const sid = sidStr_(r[1]); if (!inScope(sid)) return; const s = stu(sid); const st = String(r[4]);
+    s.log[st] = (s.log[st] || 0) + 1;
+    if (st === 'observe' || st === 'connect' || st === 'feedback') { if (String(r[7]).indexOf('"mode":"rule"') < 0) s.aiN++; else s.ruleN++; }
+  });
+
+  const list = Object.keys(S).map(function (k) { return S[k]; }).sort(function (a, b) { return a.cls - b.cls || a.seat - b.seat; });
+  const N = list.length;
+  const funnel = STAGES_.map(function (st) { const n = list.filter(function (s) { return s.done[st[0]]; }).length; return { k: st[0], label: st[1], n: n, pct: pct_(n, N) }; });
+
+  // 마음 변화
+  const survey = { nPre: 0, nPost: 0, nPaired: 0, factors: [] };
+  survey.nPre = list.filter(function (s) { return s.pre; }).length; survey.nPost = list.filter(function (s) { return s.post; }).length;
+  survey.nPaired = list.filter(function (s) { return s.pre && s.post; }).length;
+  ['CNI', 'CSE', 'AIP'].forEach(function (f) {
+    const pr = list.filter(function (s) { return s.pre && s.post; });
+    survey.factors.push({ k: f, label: FACTOR_LABEL[f],
+      pre: mean_(list.filter(function (s) { return s.pre; }).map(function (s) { return s.pre[f]; })),
+      post: mean_(list.filter(function (s) { return s.post; }).map(function (s) { return s.post[f]; })),
+      pairedPre: mean_(pr.map(function (s) { return s.pre[f]; })), pairedPost: mean_(pr.map(function (s) { return s.post[f]; })) });
+  });
+  const openAns = [0, 1, 2].map(function (i) {
+    return { q: OPEN_Q[i], items: list.filter(function (s) { return s.post && cleanText_(s.post.open[i]).length >= 4; }).map(function (s) { return { sid: s.sid, t: short_(s.post.open[i], 140) }; }) };
+  });
+
+  // 퀴즈
+  const qz = list.filter(function (s) { return s.quiz; });
+  const quiz = { n: qz.length, avg: mean_(qz.map(function (s) { return s.quiz.score; })), full: qz.filter(function (s) { return s.quiz.score >= 8; }).length, items: [],
+    sentences: list.filter(function (s) { return cleanText_(s.quizSentence); }).map(function (s) { return { sid: s.sid, t: short_(s.quizSentence, 90) }; }) };
+  for (var qi = 0; qi < 8; qi++) quiz.items.push(pct_(qz.filter(function (s) { return (s.quiz.answers || [])[qi] === 1; }).length, qz.length));
+
+  // 비밀 찾기
+  const sec = list.filter(function (s) { return s.secret; }).map(function (s) {
+    const x = s.secret; const kw = SECRET_KW[x.org] || []; const flat = (x.text + x.what + x.how).replace(/\s+/g, '');
+    const all = [x.what, x.how, x.why, x.text].join(' ');
+    return { sid: s.sid, org: x.org, text: short_(x.text, 110), what: short_(x.what, 80), why: short_(x.why, 80),
+      onTarget: kw.some(function (k) { return flat.indexOf(k) >= 0; }), copied: [x.what, x.how, x.why, x.text].some(looksCopied_), noise: jamoNoise_(all),
+      hasWhy: x.why.replace(/\s/g, '').length >= 5 && !jamoNoise_(x.why), rounds: s.log.observe || 0 };
+  });
+  const okSec = sec.filter(function (x) { return !x.noise; });
+  const hl = []; const seenOrg = {};
+  okSec.filter(function (x) { return x.onTarget && !x.copied && x.hasWhy && x.text.length >= 12; })
+    .sort(function (a, b) { return b.text.length - a.text.length; })
+    .forEach(function (x) { if (hl.length < 8 && !seenOrg[x.org]) { seenOrg[x.org] = 1; hl.push(x); } });
+  const searchUsers = list.filter(function (s) { return s.log.search; }).length;
+  const observeUsers = list.filter(function (s) { return s.log.observe; });
+  const secrets = { n: sec.length, orgs: countTop_(sec.map(function (x) { return x.org; }), 12),
+    whyPct: pct_(okSec.filter(function (x) { return x.hasWhy; }).length, okSec.length), onTargetPct: pct_(okSec.filter(function (x) { return x.onTarget; }).length, okSec.length),
+    highlights: hl, copied: sec.filter(function (x) { return x.copied && !x.noise; }), offTarget: okSec.filter(function (x) { return !x.onTarget && !x.copied; }), noise: sec.filter(function (x) { return x.noise; }),
+    mentorAvg: mean_(observeUsers.map(function (s) { return s.log.observe; })), mentorTotal: observeUsers.reduce(function (a, s) { return a + s.log.observe; }, 0),
+    searchUsers: searchUsers, searchPct: pct_(searchUsers, N),
+    aiPct: pct_(list.reduce(function (a, s) { return a + s.aiN; }, 0), list.reduce(function (a, s) { return a + s.aiN + s.ruleN; }, 0)) };
+
+  // 연결하기
+  const con = list.filter(function (s) { return s.connect; }).map(function (s) {
+    const top = scoreConnect_(s.connect.problem)[0];
+    return { sid: s.sid, problem: short_(s.connect.problem, 70), chosen: s.connect.chosen, reason: short_(s.connect.reason, 100), type: top ? top.rule.id : 'none',
+      causal: /니까|때문|어서|아서|해서|라서|므로|이어서/.test(s.connect.reason), noise: jamoNoise_(s.connect.problem + s.connect.reason) };
+  });
+  const okCon = con.filter(function (x) { return !x.noise; });
+  const connect = { n: con.length, types: countTop_(okCon.map(function (x) { return TYPE_LABEL[x.type] || '기타'; }), 10), chosen: countTop_(okCon.map(function (x) { return x.chosen; }), 10),
+    causalPct: pct_(okCon.filter(function (x) { return x.causal; }).length, okCon.length), problems: countTop_(okCon.map(function (x) { return x.problem; }), 8),
+    reasons: okCon.filter(function (x) { return x.causal && x.reason.length >= 12; }).slice(0, 10) };
+
+  // 발명하기
+  const inv = list.filter(function (s) { return s.inv; }).map(function (s) {
+    const fb = ruleFeedback_({ organism: s.inv.org, name: s.inv.name }, s.inv.desc, 0, s.sid); const ck = {};
+    (fb.checklist || []).forEach(function (c) { ck[c.k] = c.ok; });
+    return { sid: s.sid, name: short_(s.inv.name, 30), org: s.inv.org, desc: short_(s.inv.desc, 320), diff: short_(cleanText_(s.inv.diff), 160), file: s.inv.file, imgs: s.log.image || 0, fbN: s.log.feedback || 0,
+      ck: ck, noise: !!fb.error, mismatch: /^고른 생물은/.test(fb.check || ''), copied: /^인터넷/.test(fb.check || ''), recv: s.recv, cms: s.cms.slice(-4) };
+  });
+  const okInv = inv.filter(function (x) { return !x.noise; });
+  const ckPct = {}; ['이름', '생물', '비밀', '누가·언제'].forEach(function (k) { ckPct[k] = pct_(okInv.filter(function (x) { return x.ck[k]; }).length, okInv.length); });
+  const invention = { n: inv.length, ckPct: ckPct, orgs: countTop_(inv.map(function (x) { return x.org; }), 10),
+    imgUsers: inv.filter(function (x) { return x.imgs > 0; }).length, imgTotal: inv.reduce(function (a, x) { return a + x.imgs; }, 0),
+    diffPct: pct_(inv.filter(function (x) { return x.diff; }).length, inv.length), diffs: inv.filter(function (x) { return x.diff.length >= 6; }).map(function (x) { return { sid: x.sid, name: x.name, t: x.diff }; }).slice(0, 12),
+    mismatch: inv.filter(function (x) { return x.mismatch; }).map(function (x) { return { sid: x.sid, name: x.name, org: x.org }; }), copied: inv.filter(function (x) { return x.copied; }).map(function (x) { return { sid: x.sid, name: x.name }; }),
+    noise: inv.filter(function (x) { return x.noise; }).map(function (x) { return { sid: x.sid }; }), items: inv };
+
+  // 박람회
+  const exhibit = { likes: list.reduce(function (a, s) { return a + s.recv.like; }, 0), curious: list.reduce(function (a, s) { return a + s.recv.curious; }, 0), comments: allComments.length,
+    givers: list.filter(function (s) { return s.given > 0; }).length,
+    top: inv.slice().sort(function (a, b) { return (b.recv.like + b.recv.curious + b.recv.comments) - (a.recv.like + a.recv.curious + a.recv.comments); }).filter(function (x) { return x.recv.like + x.recv.curious + x.recv.comments > 0; }).slice(0, 6)
+      .map(function (x) { return { sid: x.sid, name: x.name, org: x.org, like: x.recv.like, curious: x.recv.curious, comments: x.recv.comments, cms: x.cms }; }),
+    praise: countTop_(allComments, 8), noReceive: inv.filter(function (x) { return x.recv.like + x.recv.curious + x.recv.comments === 0; }).map(function (x) { return x.sid; }) };
+
+  // 지킴이
+  const pro = list.filter(function (s) { return s.protect; });
+  const protect = { n: pro.length, species: countTop_(pro.map(function (s) { return s.protect.species; }), 8), promises: countTop_(pro.map(function (s) { return s.protect.promise; }), 8),
+    letters: pro.filter(function (s) { return cleanText_(s.protect.letter).length >= 10; }).map(function (s) { return { sid: s.sid, species: s.protect.species, t: short_(s.protect.letter, 180) }; }).slice(0, 10),
+    lost: pro.filter(function (s) { return cleanText_(s.protect.lost).length >= 4 && s.protect.lost !== '아니요'; }).map(function (s) { return { sid: s.sid, species: s.protect.species, t: short_(s.protect.lost, 80) }; }).slice(0, 8) };
+
+  // 소감 · 달라진 생각
+  const ref = list.filter(function (s) { return s.reflect; });
+  const reflect = { n: ref.length,
+    nature: ref.filter(function (s) { return cleanText_(s.reflect.nature).length >= 2; }).map(function (s) { return { sid: s.sid, t: short_(s.reflect.nature, 80) }; }),
+    texts: ref.filter(function (s) { return cleanText_(s.reflect.text).length >= 4; }).map(function (s) { return { sid: s.sid, t: short_(s.reflect.text, 140) }; }).slice(0, 12),
+    pairs: list.filter(function (s) { return cleanText_(s.quizSentence) && s.reflect && cleanText_(s.reflect.nature); }).map(function (s) { return { sid: s.sid, before: short_(s.quizSentence, 80), after: short_(s.reflect.nature, 80) }; }) };
+
+  // 교사 시사점(데이터 근거 규칙)
+  const tips = [];
+  const add = function (lv, t) { tips.push({ lv: lv, t: t }); };
+  if (N) {
+    const low = funnel.filter(function (f) { return f.k !== 'post' && f.k !== 'pre' && f.n > 0; }).sort(function (a, b) { return a.pct - b.pct; })[0];
+    if (low && low.pct < 70) add('todo', '‘' + low.label + '’까지 마친 학생이 ' + low.pct + '%(' + low.n + '/' + N + '명)예요. 다음 시간 시작 5분에 이 단계를 먼저 마무리하게 해 주세요.');
+  }
+  if (quiz.n) {
+    const hard = quiz.items.map(function (p, i) { return { p: p, i: i }; }).sort(function (a, b) { return a.p - b.p; })[0];
+    add(quiz.avg >= 6.5 ? 'good' : 'watch', '만나기 퀴즈 평균 ' + quiz.avg + '점/8점(만점 ' + quiz.full + '명).' + (hard.p < 85 ? ' 가장 어려웠던 문항은 ' + (hard.i + 1) + '번(정답률 ' + hard.p + '%) — 그 생물을 비밀 찾기 첫 예시로 다시 짚어 주면 좋아요.' : ''));
+  }
+  if (okSec.length) {
+    if (secrets.whyPct < 70) add('todo', '비밀 찾기에서 ‘왜 그럴까?(까닭)’ 칸을 채운 학생이 ' + secrets.whyPct + '%예요. “모습 → 하는 일 → 까닭” 순서를 교사가 한 번 소리 내어 시범 보이면 좋아요.');
+    else add('good', '비밀 찾기에서 까닭까지 쓴 학생이 ' + secrets.whyPct + '%예요. 관찰 → 기능 → 까닭의 흐름이 자리 잡고 있어요.');
+    if (secrets.offTarget.length >= 2) add('watch', '생체모방과 거리가 먼 비밀(예: ' + secrets.offTarget.slice(0, 2).map(function (x) { return x.org + ' “' + short_(x.text, 24) + '”'; }).join(', ') + ')을 쓴 학생이 ' + secrets.offTarget.length + '명이에요. ‘몸의 모양·구조가 어떤 일을 하는지’에 초점을 맞추도록 안내해 주세요.');
+    if (secrets.copied.length >= 2) add('watch', '인터넷 글을 그대로 옮긴 듯한 비밀이 ' + secrets.copied.length + '개 있어요. 검색 결과를 ‘내 말 한 문장’으로 바꾸는 시범이 필요해요.');
+  }
+  if (okCon.length) {
+    if (connect.types.length) add('good', '아이들이 가장 많이 꼽은 생활 속 불편은 ‘' + connect.types[0].k + '’(' + connect.types[0].n + '명)이에요. 이 맥락을 발명·발표 예시로 쓰면 공감도가 높아요.');
+    if (connect.causalPct < 60) add('todo', '‘왜 이 생물?’에 “~하니까/~때문에” 까닭을 넣은 학생이 ' + connect.causalPct + '%예요. 문장 틀 “○○은 ~하니까 ~에 어울려요”를 칠판에 붙여 두세요.');
+  }
+  if (okInv.length) {
+    const weak = Object.keys(ckPct).sort(function (a, b) { return ckPct[a] - ckPct[b]; })[0];
+    if (ckPct[weak] < 75) add('todo', '발명 설명문에서 ‘' + weak + '’ 요소를 넣은 학생이 ' + ckPct[weak] + '%로 가장 낮아요. 설계지의 3문장 틀 중 이 칸을 짚어 주세요.');
+    if (invention.mismatch.length) add('watch', '고른 생물과 설명 속 생물이 다른 발명이 ' + invention.mismatch.length + '개 있어요(' + invention.mismatch.slice(0, 3).map(function (x) { return x.sid; }).join(', ') + '). 개별 확인이 필요해요.');
+    if (invention.imgUsers) add(invention.diffPct >= 50 ? 'good' : 'todo', 'AI 그림과 내 스케치를 비교해 쓴 학생이 ' + invention.diffPct + '%예요. ' + (invention.diffPct >= 50 ? '“AI가 내 생각을 다르게 그렸다”는 기록은 AI를 비판적으로 보는 좋은 근거예요.' : '비교 칸을 꼭 쓰게 하면 AI 산출물을 비판적으로 보는 경험이 돼요.'));
+  }
+  if (inv.length && exhibit.noReceive.length) add('todo', '박람회에서 아직 스티커·칭찬을 하나도 못 받은 작품이 ' + exhibit.noReceive.length + '개예요(' + exhibit.noReceive.slice(0, 5).join(', ') + (exhibit.noReceive.length > 5 ? ' …' : '') + '). 짝 바꿔 칭찬하기로 챙겨 주세요.');
+  const noiseIds = secrets.noise.concat(invention.noise).map(function (x) { return x.sid; }).filter(function (v, i, a) { return a.indexOf(v) === i; });
+  if (noiseIds.length) add('watch', '자모가 섞인 장난 입력을 한 학생이 ' + noiseIds.length + '명 있어요(' + noiseIds.slice(0, 5).join(', ') + '). 개별로 다시 쓰게 해 주세요.');
+  if (survey.nPaired >= 5) survey.factors.forEach(function (f) {
+    if (f.pairedPre == null || f.pairedPost == null) return; const d = Math.round((f.pairedPost - f.pairedPre) * 100) / 100;
+    add(d > 0.05 ? 'good' : (d < -0.05 ? 'watch' : 'info'), '‘' + f.label + '’ 평균이 ' + f.pairedPre + ' → ' + f.pairedPost + '(' + (d > 0 ? '+' : '') + d + ', 사전·사후 모두 응답한 ' + survey.nPaired + '명 기준)로 변했어요.');
+  });
+  else if (survey.nPost === 0 && survey.nPre) add('info', '아직 ‘달라진 내 마음’(사후) 응답이 없어요. 6차시 끝 10분을 확보해 주세요.');
+
+  const students = list.map(function (s) {
+    const fl = [];
+    const sx = sec.filter(function (x) { return x.sid === s.sid; })[0]; const ix = inv.filter(function (x) { return x.sid === s.sid; })[0];
+    if (sx && sx.copied) fl.push('복사'); if (sx && sx.noise) fl.push('장난'); if (sx && !sx.onTarget && !sx.copied && !sx.noise) fl.push('먼 비밀');
+    if (ix && ix.mismatch) fl.push('생물 다름'); if (ix && ix.noise) fl.push('장난');
+    return { sid: s.sid, cls: s.cls, seat: s.seat, done: STAGES_.map(function (st) { return s.done[st[0]] ? 1 : 0; }), quiz: s.quiz ? s.quiz.score : null, mentor: s.log.observe || 0,
+      flags: fl, pre: s.pre ? s.pre.CNI : null, post: s.post ? s.post.CNI : null,
+      detail: {
+        quizSentence: short_(s.quizSentence, 120),
+        secret: s.secret ? { org: s.secret.org, what: short_(s.secret.what, 160), how: short_(s.secret.how, 160), why: short_(s.secret.why, 160), text: short_(s.secret.text, 160) } : null,
+        connect: s.connect ? { problem: short_(s.connect.problem, 100), chosen: s.connect.chosen, reason: short_(s.connect.reason, 140) } : null,
+        inv: ix ? { name: ix.name, org: ix.org, desc: ix.desc, diff: ix.diff, file: ix.file, imgs: ix.imgs, ck: ix.ck, recv: ix.recv, cms: ix.cms } : null,
+        protect: s.protect ? { species: s.protect.species, promise: short_(s.protect.promise, 80), letter: short_(s.protect.letter, 200) } : null,
+        reflect: s.reflect ? { s: [s.reflect.s1, s.reflect.s2, s.reflect.s3].join(' '), text: short_(s.reflect.text, 160), nature: short_(s.reflect.nature, 100) } : null,
+        open: s.post ? s.post.open.map(function (t) { return short_(t, 160); }) : null,
+      } };
+  });
+
+  return { ok: true, scope: classNo || 'all', updated: now_(), N: N, funnel: funnel, survey: survey, openAns: openAns, quiz: quiz, secrets: secrets, connect: connect,
+    invention: invention, exhibit: exhibit, protect: protect, reflect: reflect, tips: tips, students: students, sheet_url: ss_().getUrl(), mentor_mode: hasKey_() ? 'gemini' : 'rule' };
+}
+
+const SYS_INSIGHT = `너는 초등 과학교육 연구자이자 수석교사야. 3학년 창체 '생체모방 × AI 네이처 멘토' 수업 데이터 요약과 아이들이 쓴 글 일부를 읽고, 담임·전담 교사에게 줄 시사점을 정리해.
+규칙: 1) 주어진 숫자와 글에 근거해서만 말한다. 지어내지 않는다. 2) 학생은 '반-번호'로만 부른다. 3) 따뜻하지만 구체적으로, 교사가 바로 실천할 수 있게 쓴다.
+4) JSON: {"summary":"우리 반 수업을 2문장으로","strengths":["잘 되고 있는 점(근거 숫자/글 포함) 3개"],"concerns":["살펴볼 점 3개"],"next_steps":["다음 시간에 해 볼 것 3개"],"research":["논문(SSCI)에 쓸 만한 관찰·해석 포인트 3개"]}. 각 항목 60자 이내 한국어.`;
+function insightsAI_(classNo) {
+  if (!hasKey_()) return { error: 'AI 키가 없어서 AI 요약은 쉬어요. 위의 데이터 시사점을 참고해 주세요.' };
+  const d = buildInsights_(classNo);
+  const pick = function (arr, n, f) { return (arr || []).slice(0, n).map(f).join('\n'); };
+  const digest = [
+    '범위: ' + (d.scope === 'all' ? '전체 반' : d.scope + '반') + ', 참여 학생 ' + d.N + '명',
+    '단계별 완료: ' + d.funnel.map(function (f) { return f.label + ' ' + f.pct + '%'; }).join(', '),
+    '마음 변화(사전→사후, 짝지은 ' + d.survey.nPaired + '명): ' + d.survey.factors.map(function (f) { return f.label + ' ' + f.pairedPre + '→' + f.pairedPost; }).join(', '),
+    '퀴즈 평균 ' + d.quiz.avg + '/8, 문항 정답률 ' + d.quiz.items.join('/'),
+    '비밀 찾기: 까닭 작성 ' + d.secrets.whyPct + '%, 생체모방 핵심 적중 ' + d.secrets.onTargetPct + '%, 복사 의심 ' + d.secrets.copied.length + ', 먼 비밀 ' + d.secrets.offTarget.length + ', 멘토 질문 평균 ' + d.secrets.mentorAvg + '회, 검색 사용 ' + d.secrets.searchPct + '%',
+    '잘 쓴 비밀 예:\n' + pick(d.secrets.highlights, 5, function (x) { return '- ' + x.sid + ' ' + x.org + ': ' + x.text; }),
+    '먼 비밀 예:\n' + pick(d.secrets.offTarget, 4, function (x) { return '- ' + x.sid + ' ' + x.org + ': ' + x.text; }),
+    '연결하기: 불편 유형 ' + d.connect.types.map(function (t) { return t.k + ' ' + t.n; }).join(', ') + ' / 까닭 넣은 비율 ' + d.connect.causalPct + '%',
+    '발명 설명 3문장 요소 포함률: ' + Object.keys(d.invention.ckPct).map(function (k) { return k + ' ' + d.invention.ckPct[k] + '%'; }).join(', ') + ' / AI그림 사용 ' + d.invention.imgUsers + '명, 비교 소감 ' + d.invention.diffPct + '%',
+    'AI 그림 vs 내 스케치 비교 글:\n' + pick(d.invention.diffs, 6, function (x) { return '- ' + x.sid + ': ' + x.t; }),
+    '발명 예:\n' + pick(d.invention.items.filter(function (x) { return !x.noise; }), 6, function (x) { return '- ' + x.sid + ' ' + x.name + '(' + x.org + '): ' + short_(x.desc, 90); }),
+    '박람회: 좋아요 ' + d.exhibit.likes + ', 궁금해요 ' + d.exhibit.curious + ', 칭찬 댓글 ' + d.exhibit.comments + ', 반응 못 받은 작품 ' + d.exhibit.noReceive.length,
+    '지킴이 편지:\n' + pick(d.protect.letters, 4, function (x) { return '- ' + x.sid + ' (' + x.species + '): ' + short_(x.t, 80); }),
+    '자연은 나에게(1차시→6차시):\n' + pick(d.reflect.pairs, 5, function (x) { return '- ' + x.sid + ': ' + x.before + ' → ' + x.after; }),
+    '사후 서술 응답:\n' + d.openAns.map(function (o) { return '[' + o.q + ']\n' + pick(o.items, 4, function (x) { return '- ' + x.sid + ': ' + x.t; }); }).join('\n'),
+  ].join('\n');
+  const schema = { type: 'OBJECT', properties: { summary: { type: 'STRING' }, strengths: { type: 'ARRAY', items: { type: 'STRING' } }, concerns: { type: 'ARRAY', items: { type: 'STRING' } }, next_steps: { type: 'ARRAY', items: { type: 'STRING' } }, research: { type: 'ARRAY', items: { type: 'STRING' } } }, required: ['summary', 'strengths', 'concerns', 'next_steps', 'research'] };
+  try {
+    const out = parseJson_(gemini_(SYS_INSIGHT, digest, schema, 2048), null);
+    if (!out || !out.summary) return { error: 'AI 요약을 만들지 못했어요. 잠시 뒤 다시 눌러 주세요.' };
+    out.ok = true; return out;
+  } catch (e) { return { error: 'AI 요약 실패: ' + String(e.message).slice(0, 60) }; }
 }
 
 /** 연구용 내보내기: SPSS_사전·SPSS_사후(wide), 로그요약 */
