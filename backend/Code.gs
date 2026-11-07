@@ -987,7 +987,7 @@ function buildInsights_(classNo) {
     if (reached) add('info', '지금 대부분의 학생(' + reached.pct + '%)이 ‘' + reached.label + '’까지 왔어요.');
     const gaps = mid.map(function (f, i) { const later = Math.max.apply(null, [0].concat(mid.slice(i + 1).map(function (x) { return x.n; }))); return { f: f, later: later, gap: later - f.n }; })
       .filter(function (x) { return x.gap >= Math.max(3, N * 0.15); }).sort(function (a, b) { return b.gap - a.gap; });
-    if (gaps.length) { const g = gaps[0]; add('todo', '다음 단계는 ' + g.later + '명이 했는데 ‘' + g.f.label + '’은 ' + g.f.n + '명만 저장했어요. ' + g.gap + '명쯤이 이 단계를 건너뛰었거나 저장을 안 눌렀을 수 있어요. 시간을 따로 챙길지 확인해 주세요.'); }
+    if (gaps.length) { const g = gaps[0]; add('todo', '다음 단계는 ' + g.later + '명이 했는데 ‘' + g.f.label + '’ 단계는 ' + g.f.n + '명만 저장했어요. ' + g.gap + '명쯤이 이 단계를 건너뛰었거나 저장을 안 눌렀을 수 있어요. 시간을 따로 챙길지 확인해 주세요.'); }
   }
   if (quiz.n) {
     const hard = quiz.items.map(function (p, i) { return { p: p, i: i }; }).sort(function (a, b) { return a.p - b.p; })[0];
