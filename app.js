@@ -575,7 +575,7 @@
     $('saveR').onclick = async () => {
       if (!$('s1').value || !$('s2').value || !$('s3').value) { toast('발표 3문장을 모두 채워요!'); return; }
       $('saveR').disabled = true;
-      try { await api('reflect', { s_organism: $('s1').value, s_secret: $('s2').value, s_use: $('s3').value, reflection: $('refl').value, nature_is: $('natureIs').value }); S.progress.reflect_done = true; renderNav(); toast('소감을 저장했어요! 마지막으로 사후 검사를 해요 📝'); go('post'); }
+      try { await api('reflect', { s_organism: $('s1').value, s_secret: $('s2').value, s_use: $('s3').value, reflection: $('refl').value, nature_is: $('natureIs').value }); S.progress.reflect_done = true; renderNav(); toast('소감을 저장했어요! 마지막으로 달라진 내 마음을 알아봐요 🌱'); go('post'); }
       catch (e) { toast('저장 실패: ' + e.message); $('saveR').disabled = false; }
     };
   };
