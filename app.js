@@ -688,7 +688,7 @@
        <h4>설명문 3문장 틀, 얼마나 갖췄나요?</h4>${iBars(Object.keys(iv.ckPct).map((k) => ({ k, pct: iv.ckPct[k], v: iv.ckPct[k] + '%' })))}
        <h4>🎨 AI 그림 vs 내 스케치 — 아이들이 찾은 차이</h4>${iQuotes(iv.diffs.map((x) => ({ sid: x.sid, tag: x.name, t: x.t })), 'AI 그림과 비교한 글이 아직 없어요.')}
        <h4>👀 살펴볼 발명</h4>${iFlags([['고른 생물과 설명 속 생물이 다름', iv.mismatch.map((x) => ({ sid: x.sid, tag: x.name, t: '고른 생물: ' + x.org }))], ['인터넷 글 복사', iv.copied.map((x) => ({ sid: x.sid, t: x.name }))], ['장난 입력', iv.noise.map((x) => ({ sid: x.sid, t: '(자모가 섞인 글)' }))]])}
-       <h4>💡 아이들의 발명품</h4><div class="iinv">${iv.items.filter((x) => !x.noise).map((x) => `<article class="iv"><div class="iv-img" data-file="${esc(x.file)}">${x.file ? '<button class="btn ghost sm iv-load">🖼 AI 그림 보기</button>' : '<span class="tiny">AI 그림 없음 (스케치만)</span>'}</div>
+       <h4>💡 아이들의 발명품</h4><div class="iinv">${iv.items.filter((x) => !x.noise).map((x) => `<article class="iv"><div class="iv-img" data-file="${esc(x.file)}">${x.file ? '<div class="iv-spin">🎨 AI 그림 불러오는 중…</div>' : '<span class="tiny">AI 그림 없음 (스케치만)</span>'}</div>
          <div class="iv-b"><b>${esc(x.name)}</b> <span class="tiny">${esc(x.sid)} · ${esc(x.org)}</span><p>${esc(x.desc)}</p><div class="iv-ck">${Object.keys(x.ck).map((k) => `<span class="ck ${x.ck[k] ? 'ok' : ''}">${x.ck[k] ? '✅' : '⬜'} ${esc(k)}</span>`).join('')}</div>
          <div class="tiny">👍 ${x.recv.like} · ❓ ${x.recv.curious} · 💬 ${x.recv.comments}${x.imgs ? ` · 🎨 ${x.imgs}장` : ''}${x.fbN ? ` · 멘토 피드백 ${x.fbN}번` : ''}</div></div></article>`).join('')}</div>`);
     h += iSec('🏆', '5~6차시 · 박람회', `반응 ${ex.likes + ex.curious + ex.comments}개`,
@@ -728,10 +728,31 @@
       if (det.hidden) { det.firstElementChild.innerHTML = studentDetail(d.students[parseInt(tr.dataset.i, 10)]); det.hidden = false; tr.classList.add('open'); }
       else { det.hidden = true; tr.classList.remove('open'); }
     });
-    body.querySelectorAll('.iv-load').forEach((b) => b.onclick = async () => {
-      const box = b.closest('.iv-img'); b.disabled = true; b.textContent = '불러오는 중…';
-      try { const r = await api('image', { file_id: box.dataset.file }); box.innerHTML = r.data_url ? `<img src="${r.data_url}" alt="AI 그림">` : '<span class="tiny">그림을 찾지 못했어요</span>'; }
-      catch (e) { b.disabled = false; b.textContent = '다시 시도'; }
+    autoImages(body);
+  }
+  // AI 그림 자동 표시: ① 선생님 계정으로 로그인된 크롬이면 드라이브 썸네일로 바로 ② 아니면 서버에서 4장씩 차례로 받아오기
+  const IMGQ = { q: [], active: 0, cache: {}, gen: 0 };
+  const setImg = (box, src) => { box.innerHTML = `<img src="${src}" alt="AI 그림" loading="lazy">`; box.dataset.done = '1'; };
+  function pumpImg() {
+    while (IMGQ.active < 4 && IMGQ.q.length) {
+      const box = IMGQ.q.shift(); if (!box.isConnected || box.dataset.done) continue;
+      const f = box.dataset.file; IMGQ.active++; box.dataset.done = '1';
+      api('image', { file_id: f }).then((r) => { if (r.data_url) { IMGQ.cache[f] = r.data_url; setImg(box, r.data_url); } else box.innerHTML = '<span class="tiny">그림을 찾지 못했어요</span>'; })
+        .catch(() => { box.innerHTML = '<span class="tiny">그림을 불러오지 못했어요</span>'; })
+        .finally(() => { IMGQ.active--; pumpImg(); });
+    }
+  }
+  function autoImages(root) {
+    IMGQ.q = []; const gen = ++IMGQ.gen;
+    root.querySelectorAll('.iv-img[data-file]').forEach((box) => {
+      const f = box.dataset.file; if (!f) return;
+      if (IMGQ.cache[f]) { setImg(box, IMGQ.cache[f]); return; }
+      const fallback = () => { if (gen !== IMGQ.gen || box.dataset.done) return; IMGQ.q.push(box); pumpImg(); };
+      const im = new Image(); im.referrerPolicy = 'no-referrer';
+      im.onload = () => { if (im.naturalWidth > 60) { IMGQ.cache[f] = im.src; if (box.isConnected) setImg(box, im.src); } else fallback(); };
+      im.onerror = fallback;
+      setTimeout(() => { if (!im.complete) fallback(); }, 8000);
+      im.src = `https://drive.google.com/thumbnail?id=${encodeURIComponent(f)}&sz=w800`;
     });
   }
 
