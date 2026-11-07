@@ -802,6 +802,21 @@ function pct_(a, b) { return b ? Math.round(a / b * 100) : 0; }
 function short_(t, n) { t = String(t || '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n) + '…' : t; }
 function cleanText_(t) { t = String(t || '').trim(); return t && !jamoNoise_(t) ? t : ''; }
 
+function formPre_() {   // 1차시(10/12) 구글폼 사전 응답(스크립트 속성 PRE_FORM_SHEET_ID) → { '반-번호': {CNI, CSE, AIP} }
+  const id = props_().getProperty('PRE_FORM_SHEET_ID'); if (!id) return {};
+  try {
+    const sh = SpreadsheetApp.openById(id).getSheetByName('응답_사전'); if (!sh) return {};
+    const v = sh.getDataRange().getValues(); const out = {}; const circ = '①②③④⑤';
+    const num = function (x) { const m = String(x).match(/[①②③④⑤]/); if (m) return circ.indexOf(m[0]) + 1; const n = parseInt(x, 10); return n >= 1 && n <= 5 ? n : null; };
+    for (var i = 1; i < v.length; i++) {
+      const c = parseInt(String(v[i][1]).replace(/\D/g, ''), 10), st = parseInt(String(v[i][2]).replace(/\D/g, ''), 10); if (!c || !st) continue;
+      const a = v[i].slice(4, 31).map(num); if (a.filter(function (x) { return x; }).length < 20) continue;
+      const m = function (from, to) { const xs = a.slice(from, to).filter(function (x) { return x; }); return xs.length ? Math.round(xs.reduce(function (p, q) { return p + q; }, 0) / xs.length * 1000) / 1000 : ''; };
+      out[c + '-' + st] = { CNI: m(0, 16), CSE: m(16, 22), AIP: m(22, 27), open: ['', '', ''], src: 'form' };
+    }
+    return out;
+  } catch (e) { return {}; }
+}
 function buildInsights_(classNo) {
   classNo = parseInt(classNo, 10) || 0;
   const inScope = function (sid) { sid = sidStr_(sid); return !!sid && sid.indexOf('-') > 0 && !isTestSid_(sid) && (!classNo || clsOf_(sid) === classNo); };
@@ -816,6 +831,8 @@ function buildInsights_(classNo) {
     s[ph] = { CNI: r[ci('M_CNI')], CSE: r[ci('M_CSE')], AIP: r[ci('M_AIP')], open: [r[ci('open1')], r[ci('open2')], r[ci('open3')]].map(function (x) { return String(x || ''); }) };
     s.done[ph] = 1;
   });
+  const fp = formPre_(); let preForm = 0;
+  Object.keys(fp).forEach(function (sid) { if (!inScope(sid)) return; const s = stu(sid); if (!s.pre) { s.pre = fp[sid]; s.done.pre = 1; preForm++; } });
   // 퀴즈
   rows_('퀴즈').forEach(function (r) {
     const sid = sidStr_(r[1]); if (!inScope(sid)) return; const s = stu(sid);
@@ -873,7 +890,7 @@ function buildInsights_(classNo) {
   const funnel = STAGES_.map(function (st) { const n = list.filter(function (s) { return s.done[st[0]]; }).length; return { k: st[0], label: st[1], n: n, pct: pct_(n, N) }; });
 
   // 마음 변화
-  const survey = { nPre: 0, nPost: 0, nPaired: 0, factors: [] };
+  const survey = { nPre: 0, nPost: 0, nPaired: 0, preForm: preForm, factors: [] };
   survey.nPre = list.filter(function (s) { return s.pre; }).length; survey.nPost = list.filter(function (s) { return s.post; }).length;
   survey.nPaired = list.filter(function (s) { return s.pre && s.post; }).length;
   ['CNI', 'CSE', 'AIP'].forEach(function (f) {
@@ -965,8 +982,12 @@ function buildInsights_(classNo) {
   const tips = [];
   const add = function (lv, t) { tips.push({ lv: lv, t: t }); };
   if (N) {
-    const low = funnel.filter(function (f) { return f.k !== 'post' && f.k !== 'pre' && f.n > 0; }).sort(function (a, b) { return a.pct - b.pct; })[0];
-    if (low && low.pct < 70) add('todo', '‘' + low.label + '’까지 마친 학생이 ' + low.pct + '%(' + low.n + '/' + N + '명)예요. 다음 시간 시작 5분에 이 단계를 먼저 마무리하게 해 주세요.');
+    const mid = funnel.filter(function (f) { return f.k !== 'pre' && f.k !== 'post'; });
+    const reached = mid.filter(function (f) { return f.pct >= 50; }).pop();
+    if (reached) add('info', '지금 대부분의 학생(' + reached.pct + '%)이 ‘' + reached.label + '’까지 왔어요.');
+    const gaps = mid.map(function (f, i) { const later = Math.max.apply(null, [0].concat(mid.slice(i + 1).map(function (x) { return x.n; }))); return { f: f, later: later, gap: later - f.n }; })
+      .filter(function (x) { return x.gap >= Math.max(3, N * 0.15); }).sort(function (a, b) { return b.gap - a.gap; });
+    if (gaps.length) { const g = gaps[0]; add('todo', '다음 단계는 ' + g.later + '명이 했는데 ‘' + g.f.label + '’은 ' + g.f.n + '명만 저장했어요. ' + g.gap + '명쯤이 이 단계를 건너뛰었거나 저장을 안 눌렀을 수 있어요. 시간을 따로 챙길지 확인해 주세요.'); }
   }
   if (quiz.n) {
     const hard = quiz.items.map(function (p, i) { return { p: p, i: i }; }).sort(function (a, b) { return a.p - b.p; })[0];

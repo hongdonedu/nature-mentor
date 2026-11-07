@@ -667,10 +667,10 @@
     h += iSec('📌', '교사에게 주는 시사점', '데이터가 말해 주는 것',
       `<ul class="itips">${d.tips.length ? d.tips.map((t) => `<li class="${t.lv}"><span>${TIP_ICO[t.lv] || '•'}</span><p>${esc(t.t)}</p></li>`).join('') : '<li class="info"><span>ℹ️</span><p>아직 데이터가 적어요. 수업이 진행되면 시사점이 생겨요.</p></li>'}</ul>
        <div id="insAI" class="iai"><div class="thinking">🤖 AI가 아이들 글을 읽고 시사점을 정리하는 중…</div></div>`);
-    const surveyBody = (sv.nPre || sv.nPost) ? `<p class="muted">사전 ${sv.nPre}명 · 사후 ${sv.nPost}명 · 둘 다 응답 ${sv.nPaired}명 (5점 척도${sv.nPaired ? ', 둘 다 응답한 학생 기준' : ''})</p>` + sv.factors.map((f) => {
+    const surveyBody = (sv.nPre || sv.nPost) ? `<p class="muted">사전 ${sv.nPre}명${sv.preForm ? `(이 중 ${sv.preForm}명은 1차시 구글폼 응답)` : ''} · 사후 ${sv.nPost}명 · 둘 다 응답 ${sv.nPaired}명 (5점 척도${sv.nPaired ? ', 둘 다 응답한 학생 기준' : ''})</p>` + sv.factors.map((f) => {
       const a = sv.nPaired ? f.pairedPre : f.pre, b = sv.nPaired ? f.pairedPost : f.post; const dl = (a != null && b != null) ? Math.round((b - a) * 100) / 100 : null;
       return `<div class="ipair"><div class="ip-l">${esc(f.label)}${dl != null ? ` <span class="delta ${dl > 0 ? 'up' : dl < 0 ? 'down' : ''}">${dl > 0 ? '+' : ''}${dl}</span>` : ''}</div><div class="ip-b"><span class="pre" style="width:${(a || 0) / 5 * 100}%"><em>사전 ${a != null ? a : '-'}</em></span><span class="post" style="width:${(b || 0) / 5 * 100}%"><em>사후 ${b != null ? b : '-'}</em></span></div></div>`;
-    }).join('') + (sv.nPost ? '' : '<p class="tiny">‘달라진 내 마음’(사후) 응답이 모이면 변화가 보여요. 10/12 1차시 사전 응답은 구글폼 응답 시트에 따로 있어요.</p>') : '<p class="muted">아직 응답이 없어요.</p>';
+    }).join('') + (sv.nPaired < 10 ? '<p class="tiny">‘달라진 내 마음’(사후) 응답이 더 모이면 변화가 또렷해져요. 지금 숫자는 참고용이에요.</p>' : '') : '<p class="muted">아직 응답이 없어요.</p>';
     h += iSec('💗', '마음 변화', '내 마음 알아보기 → 달라진 내 마음', surveyBody);
     h += iSec('🔍', '1차시 · 만나기 퀴즈', `${d.quiz.n}명 · 평균 ${d.quiz.avg != null ? d.quiz.avg : '-'}점 · 만점 ${d.quiz.full}명`,
       `<h4>문항별 정답률</h4>${iBars(d.quiz.items.map((p, i) => ({ k: `${i + 1}. ${QUIZ[i] ? QUIZ[i].inv : ''}`, pct: p, v: p + '%' })))}
